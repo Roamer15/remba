@@ -13,7 +13,7 @@ datasource db {
 }
 
 model User {
-  phoneNumber string     @id // WhatsApp unique ID
+  phoneNumber String     @id // WhatsApp unique ID
   name        String?
   language    String     @default("EN") // "EN" or "FR"
   createdAt   DateTime   @default(now())
@@ -29,7 +29,7 @@ model Reminder {
   streakCount    Int       @default(0)
   isActive       Boolean   @default(true)
   user           User      @relation(fields: [userPhoneNumber], references: [phoneNumber], onDelete: Cascade)
-  userPhoneNumber string
+  userPhoneNumber String
   logs           DoseLog[]
 
   @@map("reminders")
