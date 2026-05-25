@@ -1,0 +1,47 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  phoneNumber string     @id // WhatsApp unique ID
+  name        String?
+  language    String     @default("EN") // "EN" or "FR"
+  createdAt   DateTime   @default(now())
+  reminders   Reminder[]
+
+  @@map("users")
+}
+
+model Reminder {
+  id             String    @id @default(uuid())
+  medicationName String
+  reminderTime   String    // Stored format: "08:00"
+  streakCount    Int       @default(0)
+  isActive       Boolean   @default(true)
+  user           User      @relation(fields: [userPhoneNumber], references: [phoneNumber], onDelete: Cascade)
+  userPhoneNumber string
+  logs           DoseLog[]
+
+  @@map("reminders")
+}
+
+model DoseLog {
+  id         String   @id @default(uuid())
+  status     String   @default("PENDING") // PENDING, TAKEN, TAKEN_LATE, SKIPPED
+  notes      String?
+  timestamp  DateTime @default(now())
+  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  reminderId String
+
+  @@map("dose_logs")
+}
