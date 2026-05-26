@@ -16,6 +16,7 @@ model User {
   phoneNumber String     @id // WhatsApp unique ID
   name        String?
   language    String     @default("EN") // "EN" or "FR"
+  timezoneOffset Int        @default(1)
   createdAt   DateTime   @default(now())
   reminders   Reminder[]
 

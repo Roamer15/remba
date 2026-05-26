@@ -47,7 +47,7 @@ export class WhatsappService {
 
     // Validate required environment variables
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const accessToken = process.env.WHATSAPP_API_TOKEN;
 
     if (!phoneNumberId) {
       throw new Error(

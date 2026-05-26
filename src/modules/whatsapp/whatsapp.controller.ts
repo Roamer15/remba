@@ -10,10 +10,14 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
+import { MessageHandlerService } from './message-handler.service';
 
 @Controller('whatsapp')
 export class WhatsappController {
-  constructor(private readonly whatsappService: WhatsappService) {}
+  constructor(
+    private readonly whatsappService: WhatsappService,
+    private readonly messageHandlerService: MessageHandlerService,
+  ) {}
 
   /**
    * Webhook Verification (GET)
@@ -42,7 +46,7 @@ export class WhatsappController {
    */
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
-  handleIncomingMessage(@Body() payload: any) {
+  async handleIncomingMessage(@Body() payload: any) {
     // Extract messaging components safely
     const messageData = this.whatsappService.extractMessagePayload(payload);
 
@@ -51,6 +55,7 @@ export class WhatsappController {
     }
 
     // Process the text message through the service layer
+    await this.messageHandlerService.handleIncomingPayload(messageData);
     this.whatsappService.processUserMessage(messageData.from, messageData.text);
 
     return { status: 'success' };

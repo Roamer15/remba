@@ -2,6 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OpenAI } from 'openai';
 import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-result.interface';
+import { ScheduleExtractionResult } from './interfaces/schedule-interaction.interface';
 
 @Injectable()
 export class OpenaiService {
@@ -96,5 +97,77 @@ export class OpenaiService {
     sanitized = sanitized.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
 
     return sanitized.trim();
+  }
+
+  /**
+   * Parses natural text strings from existing users to extract structured medication regimes.
+   * Maps vague descriptions (morning, evening, etc.) into definitive 24h string values.
+   */
+  async extractMedicationSchedules(
+    incomingText: string,
+    language: 'EN' | 'FR',
+    userName: string,
+  ): Promise<ScheduleExtractionResult> {
+    try {
+      const sanitizedMessage = this.sanitizeInput(incomingText);
+
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba, a helpful, empathetic medication scheduling assistant. Your job is to extract medication names and precise times from natural text.
+            
+            Context: You are talking to a patient named ${userName}. Their preferred language code is ${language}. You MUST respond in this language.
+            
+            CRITICAL PROCESSING RULES:
+            1. If the user mentions vague periods instead of exact numbers, map them to these 24-hour markers:
+               - Morning / Matin -> "08:00"
+               - Afternoon / Après-midi -> "13:00"
+               - Evening / Soir -> "19:00"
+               - Night / Nuit -> "21:00"
+            2. If they provide multiple times or specify something like "twice a day (8am and 8pm)", generate multiple entries in the array for that medication name.
+            3. GUARDRAIL: If the user's text is unrelated to medical setups (e.g., "What is your name?", "Thank you", "I am tired"), leave the "remindersFound" array completely EMPTY. In the "confirmationMessage", provide a brief polite answer to their comment, but strictly remind them that they need to add their medication details first before proceeding with a wider discussion.
+            
+            You MUST respond ONLY with a valid JSON object matching this schema:
+            {
+              "remindersFound": [
+                { "medicationName": "string", "reminderTime": "string (format HH:MM)" }
+              ],
+              "confirmationMessage": "string"
+            }`,
+          },
+          {
+            role: 'user',
+            content: `Message to parse: "${sanitizedMessage}"`,
+          },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.1, // Keep temperature low for maximum structural accuracy
+      });
+
+      const content = response.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error(
+          'No content returned from OpenAI schedule extraction token payload',
+        );
+      }
+
+      return JSON.parse(content) as ScheduleExtractionResult;
+    } catch (error) {
+      this.logger.error(
+        'Failed extracting schedules from text layout stream',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+
+      // Fallback response safely typed to meet contract constraints
+      return {
+        remindersFound: [],
+        confirmationMessage:
+          language === 'FR'
+            ? "Désolé, je n'ai pas pu structurer vos rappels. Veuillez spécifier le nom du médicament et l'heure (ex: Paracétamol à 8h)."
+            : "Sorry, I couldn't structure your reminders clearly. Please specify the drug name and time (e.g., Paracetamol at 8am).",
+      };
+    }
   }
 }
