@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { AnalyticsService } from './analytics.service';
+import axios from 'axios';
 
 @Injectable()
 export class SchedulerService {
@@ -171,7 +172,7 @@ export class SchedulerService {
     language: 'EN' | 'FR',
   ) {
     try {
-      // 1. Fetch the user's last 3 chronological logs
+      // Fetch the user's last 3 chronological logs
       const recentLogs = await this.prisma.doseLog.findMany({
         where: {
           reminder: { userPhoneNumber: userPhoneNumber },
@@ -185,14 +186,14 @@ export class SchedulerService {
       // If they haven't accumulated 3 alerts yet, skip calculation
       if (recentLogs.length < 3) return;
 
-      // 2. Evaluate compliance criteria (True if ALL 3 logs are SKIPPED or TAKEN_LATE)
+      // Evaluate compliance criteria (True if ALL 3 logs are SKIPPED or TAKEN_LATE)
       const isSeverelyNonCompliant = recentLogs.every(
         (log) => log.status === 'SKIPPED' || log.status === 'TAKEN_LATE',
       );
 
       if (!isSeverelyNonCompliant) return;
 
-      // 3. Query the user table to see if an assigned Treatment Supporter exists
+      // Query the user table to see if an assigned Treatment Supporter exists
       const userWithMentor = await this.prisma.user.findUnique({
         where: { phoneNumber: userPhoneNumber },
         include: { mentor: true },
@@ -207,7 +208,7 @@ export class SchedulerService {
 
       const mentor = userWithMentor.mentor;
 
-      // 4. Construct your highly professional S.O.S communication template
+      // Construct your highly professional S.O.S communication template
       const isFrench = language === 'FR';
       const mentorName = mentor.name || 'Supporter';
 
@@ -215,7 +216,7 @@ export class SchedulerService {
         ? `Bonjour ${mentorName}, le patient ${userName} (${userPhoneNumber}) n'a pas pris correctement ses derniers médicaments (manqués ou pris en retard). Pourriez-vous le contacter pour comprendre la situation et vous assurer qu'il se porte bien ? Merci d'intervenir.`
         : `Hey ${mentorName}, ${userName} with number ${userPhoneNumber} hasn't been taking their medication safely lately (either skipped or taken heavily late). Do you mind checking on them and trying to know why they've not been taking their meds?`;
 
-      // 5. Transmit the alert message to the MENTOR's phone number!
+      // Transmit the alert message to the MENTOR's phone number!
       await this.whatsappService.sendWhatsAppPayload(
         mentor.phoneNumber,
         sosMessage,
@@ -228,6 +229,30 @@ export class SchedulerService {
       this.logger.error(
         `Failed executing Day 7 escalation cascade engine rules for ${userPhoneNumber}`,
         error,
+      );
+    }
+  }
+
+  /**
+   * Hackathon Optimization: Prevents Render free-tier containers from sleeping.
+   * Fires a lightweight internal heartbeat ping every 10 minutes.
+   */
+  @Cron('*/10 * * * *')
+  async keepContainerWarm() {
+    try {
+      // Fallback to localhost if the production URL variable isn't injected yet
+      const liveUrl = process.env.PRODUCTION_URL || 'http://localhost:3000';
+
+      this.logger.log(
+        `[🔥 HEARTBEAT] Dispatching warm-engine ping to: ${liveUrl}/health-check`,
+      );
+
+      const response = await axios.get(`${liveUrl}/health-check`);
+      this.logger.log(`[✅ HEARTBEAT] Server responded with: ${response.data}`);
+    } catch (error) {
+      this.logger.error(
+        '[⚠️ HEARTBEAT] Self-ping failed. Make sure PRODUCTION_URL environment variable is set on Render.',
+        error instanceof Error ? error.message : String(error),
       );
     }
   }

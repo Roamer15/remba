@@ -73,6 +73,119 @@ export class MessageHandlerService {
 
     const upperText = text.trim().toUpperCase();
 
+    // Global Help & Command Directory
+    if (upperText === 'HELP' || upperText === 'MENU' || upperText === 'AIDE') {
+      this.logger.log(`User ${from} requested the command directory matrix.`);
+
+      const isFrench = user.language === 'FR';
+      const directoryMessage = isFrench
+        ? `📋 *GUIDE DES COMMANDES REMBA* 📋\n\n` +
+          `Voici comment interagir avec moi :\n\n` +
+          `• *TAKEN* : Confirmez que vous avez pris votre dose actuelle.\n` +
+          `• *SKIP* : Indiquez une omission (ex: "SKIP j'ai oublié").\n` +
+          `• *BILAN* ou *REPORT* : Recevez votre rapport de santé hebdomadaire.\n` +
+          `• *HELP* ou *MENU* : Réaffichez ce guide.\n\n` +
+          `👥 *AJOUTER UN ENCADRANT / GARDE MALADE :*\n` +
+          `Écrivez : *MENTOR [Nom] [Numéro]*\n` +
+          `_(Exemple : MENTOR JohnDoe 2376XXXXXXXXX)_\n\n` +
+          `💊 *AJOUTER UN MÉDICAMENT :*\n` +
+          `Écrivez simplement vos détails naturellement (ex: "Prendre Paracétamol à 8h et 20h").`
+        : `📋 *REMBA COMMAND DIRECTORY* 📋\n\n` +
+          `Here are the keywords you can use to interact with me:\n\n` +
+          `• *TAKEN* : Confirm you have successfully taken your current dose.\n` +
+          `• *SKIP* : Log a missed dose along with your reason (e.g., "SKIP ran out of stock").\n` +
+          `• *REPORT* or *BILAN* : Instantly pull down your 7-day health performance report.\n` +
+          `• *HELP* or *MENU* : Pull up this command directory guide.\n\n` +
+          `👥 *TO ADD A HEALTH MENTOR / SUPPORTER / CARETAKER(We'll reach out to them if you don't take your medication properly) :*\n` +
+          `Type: *MENTOR [Name] [PhoneNumber]*\n` +
+          `_(Example: MENTOR JohnDoe 2376XXXXXXXXX)_\n\n` +
+          `💊 *REGISTER A NEW MEDICATION :*\n` +
+          `Type your instructions naturally (e.g., "I need to take Amoxicillin at 8am and 8pm").`;
+      await this.whatsappService.sendWhatsAppPayload(from, directoryMessage);
+      return;
+    }
+
+    // Add this condition directly underneath your HELP/MENU check inside handleIncomingPayload()
+
+    // 🔥 NEW ROUTE: Automated Mentor Registration & Relational Assignment
+    if (upperText.startsWith('MENTOR')) {
+      this.logger.log(
+        `User ${from} is attempting a mentor relationship mapping linking operation...`,
+      );
+
+      const isFrench = user.language === 'FR';
+
+      // Split the incoming text string by spaces to pull the individual parameters
+      // Input format example: MENTOR SirMoses 237671234567
+      const messageParts = text.trim().split(/\s+/);
+
+      if (messageParts.length < 3) {
+        const formattingErrorMessage = isFrench
+          ? `⚠️ *Format Invalide !*\nVeuillez utiliser le format exact suivant :\n*MENTOR [Nom] [Numéro]*\n_(Ex: MENTOR SirMoses 2376XXXXXXXXX)_`
+          : `⚠️ *Invalid Format !*\nPlease use this exact structural layout format:\n*MENTOR [Name] [PhoneNumber]*\n_(e.g., MENTOR JamesAkaba 2376XXXXXXXXX)_`;
+
+        await this.whatsappService.sendWhatsAppPayload(
+          from,
+          formattingErrorMessage,
+        );
+        return;
+      }
+
+      const extractedMentorName = messageParts[1];
+      const extractedMentorPhone = messageParts[2];
+
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // 1. Find or create the mentor row inside your database (prevents duplication of mentors)
+          const mentorRecord = await tx.mentor.upsert({
+            where: { phoneNumber: extractedMentorPhone },
+            create: {
+              name: extractedMentorName,
+              phoneNumber: extractedMentorPhone,
+            },
+            update: {
+              name: extractedMentorName, // Updates name if their contact number was already logged
+            },
+          });
+
+          // 2. Safely link this patient profile directly to that mentor record via their unique foreign key ID
+          await tx.user.update({
+            where: { phoneNumber: from },
+            data: {
+              mentorId: mentorRecord.id,
+            },
+          });
+        });
+
+        const successLinkMessage = isFrench
+          ? ` *Mentor Enregistré !*\n${extractedMentorName} (${extractedMentorPhone}) est maintenant configuré comme votre encadrant de traitement. En cas d'oublis de doses répétés, il recevra une alerte de sécurité.`
+          : ` *Mentor Linked Successfully !*\n${extractedMentorName} (${extractedMentorPhone}) has been assigned as your treatment supporter. If you miss multiple consecutive doses, they will be sent a safety S.O.S alert automatically.`;
+
+        await this.whatsappService.sendWhatsAppPayload(
+          from,
+          successLinkMessage,
+        );
+        this.logger.log(
+          `Successfully mapped patient ${from} to treatment mentor profile ${extractedMentorPhone}`,
+        );
+      } catch (mentorError) {
+        this.logger.error(
+          `Failed to handle transactional mentor link mapping for user ${from}`,
+          mentorError,
+        );
+
+        const systemErrorFallback = isFrench
+          ? `Oups, impossible d'enregistrer l'encadrant pour le moment. Veuillez réessayer.`
+          : `Oops, something went wrong on our side and we couldn't save your mentor. Please try again.`;
+
+        await this.whatsappService.sendWhatsAppPayload(
+          from,
+          systemErrorFallback,
+        );
+      }
+      return;
+    }
+
     // Keyword Demand for Health Analytics
     if (upperText === 'REPORT' || upperText === 'BILAN') {
       this.logger.log(
