@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OpenAI } from 'openai';
 import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-result.interface';
 import { ScheduleExtractionResult } from './interfaces/schedule-interaction.interface';
+import { AdherenceExtractionResult } from './interfaces/adherence-extraction.interface';
 
 @Injectable()
 export class OpenaiService {
@@ -167,6 +168,74 @@ export class OpenaiService {
           language === 'FR'
             ? "Désolé, je n'ai pas pu structurer vos rappels. Veuillez spécifier le nom du médicament et l'heure (ex: Paracétamol à 8h)."
             : "Sorry, I couldn't structure your reminders clearly. Please specify the drug name and time (e.g., Paracetamol at 8am).",
+      };
+    }
+  }
+
+  /**
+   * Analyzes customer check-ins when they don't match strict keywords.
+   * Classifies intents and extracts barriers (notes) for the adherence reports.
+   */
+  async parseAdherenceResponse(
+    incomingText: string,
+    language: 'EN' | 'FR',
+    userName: string,
+  ): Promise<AdherenceExtractionResult> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba, an empathetic virtual health companion in Cameroon tracking patient adherence for chronic therapies.
+            
+            Analyze the user's reply text and determine their action intent.
+            
+            CLASSIFICATION RULES:
+            - intent: "TAKEN" if they confirm they took their medication (even if late or in local slang/phrasing).
+            - intent: "SKIP" if they missed it, cannot take it, or are expressing a barrier.
+            - intent: "UNKNOWN" if it is general conversational chatter.
+            
+            IF INTENT IS "SKIP":
+            1. Categorize their primary barrier into skipReasonCategory ("SIDE_EFFECTS", "OUT_OF_STOCK", "FORGOT", "OTHER").
+            2. Summarize their barrier concisely in skipReasonNotes in English (max 10 words, e.g., "Experiencing severe dizziness").
+            
+            GENERATING THE MOTIVATIONAL RESPONSE:
+            - If TAKEN: Provide a very brief, high-energy cheer (1 sentence) using their preference language (${language}). You can use minor local encouragement or emojis like 🔥.
+            - If SKIP: Respond with deep medical empathy (1-2 sentences). Validate their struggle, encourage them to stay strong, and gently advise them to contact their local clinic provider if health anomalies persist.
+            
+            You MUST respond ONLY with a valid JSON object matching this schema:
+            {
+              "intent": "TAKEN" | "SKIP" | "UNKNOWN",
+              "skipReasonCategory": "SIDE_EFFECTS" | "OUT_OF_STOCK" | "FORGOT" | "OTHER" | null,
+              "skipReasonNotes": "string" | null,
+              "motivationalResponse": "string"
+            }`,
+          },
+          {
+            role: 'user',
+            content: `Patient Name: ${userName}\nMessage: "${incomingText}"`,
+          },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+      });
+
+      const content = response.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty payload exception');
+
+      return JSON.parse(content) as AdherenceExtractionResult;
+    } catch (error) {
+      this.logger.error(
+        'Failed to parse adherence text response payload via OpenAI',
+        error,
+      );
+      return {
+        intent: 'UNKNOWN',
+        motivationalResponse:
+          language === 'FR'
+            ? "Merci pour votre message. S'il s'agit de votre traitement, répondez 'TAKEN' pour valider."
+            : "Thank you for your message. If this is regarding your medication, please reply 'TAKEN' to confirm.",
       };
     }
   }
