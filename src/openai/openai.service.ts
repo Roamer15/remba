@@ -4,6 +4,7 @@ import { OpenAI } from 'openai';
 import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-result.interface';
 import { ScheduleExtractionResult } from './interfaces/schedule-interaction.interface';
 import { AdherenceExtractionResult } from './interfaces/adherence-extraction.interface';
+import { WeeklyMetrics } from './interfaces/weekly-report.interface';
 
 @Injectable()
 export class OpenaiService {
@@ -237,6 +238,56 @@ export class OpenaiService {
             ? "Merci pour votre message. S'il s'agit de votre traitement, répondez 'TAKEN' pour valider."
             : "Thank you for your message. If this is regarding your medication, please reply 'TAKEN' to confirm.",
       };
+    }
+  }
+
+  /**
+   * Generates an automated weekly clinical health analysis review.
+   * Modulates behavioral coaching tone strictly based on computed compliance rates.
+   */
+  async generateWeeklyMedicalReview(
+    metrics: WeeklyMetrics,
+    language: 'EN' | 'FR',
+    userName: string,
+  ): Promise<string> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba, a firm yet compassionate virtual medical specialist tracking treatment logs in Cameroon.
+            
+            You are writing a weekly health summary review for a patient named ${userName}. Language preference: ${language}.
+            
+            TONE ADJUSTMENT CRITERIA BASED ON ADHERENCE RATE (${metrics.adherenceRate}%):
+            1. POOR COMPLIANCE (Adherence < 80%): Use a stern, serious, and urgent tone (a medical scolding). Strongly emphasize that missing chronic treatments causes drug resistance, treatment failure, and severe clinical deterioration. Demand higher responsibility, address their high Skip Rate (${metrics.skipRate}%), and insist they get back on track.
+            2. MODERATE COMPLIANCE (Adherence 80% - 94%): Use a firm, encouraging, coaching tone. Note that they are doing well but highlight their Late Rate (${metrics.lateRate}%) or Skip Rate if applicable, reminding them that precision timing maximizes therapy success.
+            3. PERFECT COMPLIANCE (Adherence 95% - 100%): Use a warm, celebratory, high-energy tone. Express absolute pride, congratulate their amazing milestone streak, and encourage them to continue maintaining this gold standard for their long-term health.
+            
+            Keep the content punchy, empathetic but direct, and restricted entirely to the medical domain (max 4-5 sentences). Do not wrap inside JSON, return the raw message string output directly.`,
+          },
+          {
+            role: 'user',
+            content: `Weekly Performance Figures for ${userName}:
+            - Adherence Rate: ${metrics.adherenceRate}%
+            - Skip Rate: ${metrics.skipRate}%
+            - Late Rate: ${metrics.lateRate}%
+            - Total Expected Doses: ${metrics.totalExpectedDoses}`,
+          },
+        ],
+        temperature: 0.4,
+      });
+
+      return response.choices?.[0]?.message?.content || 'No review generated.';
+    } catch (error) {
+      this.logger.error(
+        'Failed generating weekly clinical health review analysis via OpenAI',
+        error,
+      );
+      return language === 'FR'
+        ? 'Voici votre bilan hebdomadaire : Continuez à prendre soin de votre santé au quotidien !'
+        : 'Here is your weekly health summary review: Please continue prioritizing your dosage timing daily!';
     }
   }
 }

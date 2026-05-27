@@ -5,6 +5,7 @@ import { MessageHandlerService } from './message-handler.service';
 import { OpenaiService } from 'src/openai/openai.service';
 import { PrismaService } from 'src/prisma.service';
 import { SchedulerService } from '../scheduler/scheduler.service';
+import { AnalyticsService } from '../scheduler/analytics.service';
 
 @Module({
   controllers: [WhatsappController],
@@ -14,6 +15,7 @@ import { SchedulerService } from '../scheduler/scheduler.service';
     OpenaiService,
     PrismaService,
     SchedulerService,
+    AnalyticsService,
   ],
 })
 export class WhatsappModule {}

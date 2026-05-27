@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'src/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { AnalyticsService } from './analytics.service';
 
 @Injectable()
 export class SchedulerService {
@@ -11,6 +12,7 @@ export class SchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsappService: WhatsappService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -129,6 +131,21 @@ export class SchedulerService {
       } catch (err) {
         this.logger.error(`Failed processing operational timing loop`, err);
       }
+    }
+  }
+
+  @Cron('0 20 * * 0')
+  async triggerWeeklyHealthReports() {
+    this.logger.log(
+      'Initiating automated Sunday weekly health analytics distribution...',
+    );
+
+    // Fetch all registered users
+    const users = await this.prisma.user.findMany();
+
+    // Loop and distribute their individual metrics reports
+    for (const user of users) {
+      await this.analyticsService.processAndSendWeeklyReport(user.phoneNumber);
     }
   }
 }
