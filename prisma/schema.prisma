@@ -19,8 +19,19 @@ model User {
   timezoneOffset Int     @default(1)
   createdAt   DateTime   @default(now())
   reminders   Reminder[]
+  mentorId       String?    // Foreign key linking to their supporter
+  mentor         Mentor?    @relation(fields: [mentorId], references: [id])
 
   @@map("users")
+}
+
+model Mentor {
+  id          String   @id @default(uuid())
+  name        String
+  phoneNumber String   @unique // The supporter's direct contact number
+  patients    User[]   // A mentor can track multiple patients
+
+  @@map("mentors")
 }
 
 model Reminder {

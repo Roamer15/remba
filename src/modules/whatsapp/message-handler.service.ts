@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { OpenaiService } from 'src/openai/openai.service';
 import { WhatsappService } from './whatsapp.service';
+import { AnalyticsService } from '../scheduler/analytics.service';
 import { IncomingMessagePayload } from './interfaces/onboarding-result.interface';
 import type { User } from 'src/generated/prisma/client';
 
@@ -14,6 +15,7 @@ export class MessageHandlerService {
     private readonly prisma: PrismaService,
     private readonly openaiService: OpenaiService,
     private readonly whatsappService: WhatsappService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
   /**
@@ -71,14 +73,23 @@ export class MessageHandlerService {
 
     const upperText = text.trim().toUpperCase();
 
-    // Route A: If they are replying to a medication alarm check-in
+    // Keyword Demand for Health Analytics
+    if (upperText === 'REPORT' || upperText === 'BILAN') {
+      this.logger.log(
+        `User ${from} requested on-demand metrics. Routing to AnalyticsService...`,
+      );
+      await this.analyticsService.processAndSendWeeklyReport(from);
+      return;
+    }
+
+    // If they are replying to a medication alarm check-in
     if (upperText === 'TAKEN' || upperText.startsWith('SKIP')) {
       this.logger.log(`Routing ${from} to Day 5 Adherence Engine...`);
       await this.processAdherenceCheckIn(user, text);
       return;
     }
 
-    // Route B: Default to assuming they are attempting to add a new medication schedule
+    // Default to assuming they are attempting to add a new medication schedule
     this.logger.log(`Routing ${from} to Day 3 Medication Extraction Engine...`);
     await this.processExistingUserConversation(user, text);
   }

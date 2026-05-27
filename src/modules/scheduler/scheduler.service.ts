@@ -91,10 +91,14 @@ export class SchedulerService {
         const abandonedLogs = await this.prisma.doseLog.findMany({
           where: {
             status: 'PENDING',
-            timestamp: { lt: fiveHoursAgo }, // "lt" means Less Than (created before 5 hours ago)
+            timestamp: { lt: fiveHoursAgo },
           },
           include: {
-            reminder: true,
+            reminder: {
+              include: {
+                user: true,
+              },
+            },
           },
         });
 
@@ -121,6 +125,14 @@ export class SchedulerService {
             this.logger.log(
               `[TIMEOUT ENGINE] Auto-skipped expired log ${log.id} for reminder ${log.reminderId}`,
             );
+
+            const userLanguage =
+              (log.reminder.user?.language as 'EN' | 'FR') || 'EN';
+            await this.checkAndTriggerEscalation(
+              log.reminder.userPhoneNumber,
+              log.reminder.user?.name || 'Patient',
+              userLanguage,
+            );
           } catch (sweepError) {
             this.logger.error(
               `Failed auto-skipping expired log reference ${log.id}`,
@@ -146,6 +158,77 @@ export class SchedulerService {
     // Loop and distribute their individual metrics reports
     for (const user of users) {
       await this.analyticsService.processAndSendWeeklyReport(user.phoneNumber);
+    }
+  }
+
+  /**
+   * Analyzes a patient's recent treatment timeline for severe non-compliance.
+   * If the last 3 chronological events are SKIPPED or TAKEN_LATE, triggers an S.O.S alert to their mentor.
+   */
+  private async checkAndTriggerEscalation(
+    userPhoneNumber: string,
+    userName: string,
+    language: 'EN' | 'FR',
+  ) {
+    try {
+      // 1. Fetch the user's last 3 chronological logs
+      const recentLogs = await this.prisma.doseLog.findMany({
+        where: {
+          reminder: { userPhoneNumber: userPhoneNumber },
+        },
+        orderBy: {
+          timestamp: 'desc',
+        },
+        take: 3, // Restrict query to just the 3 most recent entries
+      });
+
+      // If they haven't accumulated 3 alerts yet, skip calculation
+      if (recentLogs.length < 3) return;
+
+      // 2. Evaluate compliance criteria (True if ALL 3 logs are SKIPPED or TAKEN_LATE)
+      const isSeverelyNonCompliant = recentLogs.every(
+        (log) => log.status === 'SKIPPED' || log.status === 'TAKEN_LATE',
+      );
+
+      if (!isSeverelyNonCompliant) return;
+
+      // 3. Query the user table to see if an assigned Treatment Supporter exists
+      const userWithMentor = await this.prisma.user.findUnique({
+        where: { phoneNumber: userPhoneNumber },
+        include: { mentor: true },
+      });
+
+      if (!userWithMentor || !userWithMentor.mentor) {
+        this.logger.warn(
+          `Escalation triggered for ${userPhoneNumber}, but no mentor record is linked.`,
+        );
+        return;
+      }
+
+      const mentor = userWithMentor.mentor;
+
+      // 4. Construct your highly professional S.O.S communication template
+      const isFrench = language === 'FR';
+      const mentorName = mentor.name || 'Supporter';
+
+      const sosMessage = isFrench
+        ? `Bonjour ${mentorName}, le patient ${userName} (${userPhoneNumber}) n'a pas pris correctement ses derniers médicaments (manqués ou pris en retard). Pourriez-vous le contacter pour comprendre la situation et vous assurer qu'il se porte bien ? Merci d'intervenir.`
+        : `Hey ${mentorName}, ${userName} with number ${userPhoneNumber} hasn't been taking their medication safely lately (either skipped or taken heavily late). Do you mind checking on them and trying to know why they've not been taking their meds?`;
+
+      // 5. Transmit the alert message to the MENTOR's phone number!
+      await this.whatsappService.sendWhatsAppPayload(
+        mentor.phoneNumber,
+        sosMessage,
+      );
+
+      this.logger.log(
+        `[🚨 ESCALATION CASCADED] Non-compliance alert dispatched to mentor ${mentor.phoneNumber} for patient ${userPhoneNumber}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed executing Day 7 escalation cascade engine rules for ${userPhoneNumber}`,
+        error,
+      );
     }
   }
 }
