@@ -61,7 +61,7 @@ export class WhatsappService {
     const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
     const payload = {
       messaging_product: 'whatsapp',
-      to: to,
+      to: to.replace('+', ''),
       type: 'template',
       template: {
         name: 'hello_world',
@@ -78,8 +78,12 @@ export class WhatsappService {
       });
     } catch (err) {
       const error = err as Error;
-      this.logger.error('Meta API Transmission Failed', error.message);
-      throw err;
+      if (axios.isAxiosError(error)) {
+        console.log('Status:', error.response?.status);
+        console.log('Response:', JSON.stringify(error.response?.data, null, 2));
+      }
+
+      throw error;
     }
   }
 
