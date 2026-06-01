@@ -91,7 +91,7 @@ export class WhatsappService {
     }
   }
 
-  async sendTypingIndicator(recipientNumber: string): Promise<void> {
+  async sendTypingIndicator(messageId: string): Promise<void> {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_API_TOKEN;
 
@@ -99,9 +99,11 @@ export class WhatsappService {
 
     const payload = {
       messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: recipientNumber.replace('+', ''),
-      sender_action: 'typing_on',
+      status: 'read',
+      message_id: messageId,
+      typing_indicator: {
+        type: 'text',
+      },
     };
 
     try {
