@@ -61,13 +61,11 @@ export class WhatsappService {
     const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
     const payload = {
       messaging_product: 'whatsapp',
+      recipient_type: 'individual',
       to: to.replace('+', ''),
-      type: 'template',
-      template: {
-        name: 'hello_world',
-        language: {
-          code: 'en_US',
-        },
+      type: 'text',
+      text: {
+        body: messageBody,
       },
     };
     try {

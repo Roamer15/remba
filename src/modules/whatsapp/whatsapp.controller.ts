@@ -30,6 +30,11 @@ export class WhatsappController {
     @Query('hub.challenge') challenge: string,
     @Res() res: Response,
   ) {
+    console.log('====================');
+    console.log('WEBHOOK HIT on GET');
+    console.log(new Date().toISOString());
+    console.log('====================');
+
     const verifyToken =
       process.env.WHATSAPP_VERIFY_TOKEN || 'REMBA_SECRET_TOKEN';
 
@@ -48,6 +53,11 @@ export class WhatsappController {
   @HttpCode(HttpStatus.OK)
   async handleIncomingMessage(@Body() payload: any) {
     // Extract messaging components safely
+    console.log('====================');
+    console.log('WEBHOOK HIT');
+    console.log(new Date().toISOString());
+    console.log('====================');
+
     const messageData = this.whatsappService.extractMessagePayload(payload);
 
     if (!messageData) {
