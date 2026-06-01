@@ -10,9 +10,12 @@ export class WhatsappService {
    * Normalizes incoming webhook structures (Meta Cloud API style)
    * to extract sender details and message bodies.
    */
-  extractMessagePayload(
-    body: any,
-  ): { from: string; text: string; profileName: string } | null {
+  extractMessagePayload(body: any): {
+    from: string;
+    text: string;
+    profileName: string;
+    messageId: string;
+  } | null {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       const value = body?.entry?.[0]?.changes?.[0]?.value;
@@ -21,12 +24,15 @@ export class WhatsappService {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const contact = value?.contacts?.[0] as MetaContact | undefined;
 
+      // const messageId = value?.
+
       // Make sure we are only processing text messages for the MVP
       if (message && message.type === 'text' && message.text?.body) {
         return {
           from: message.from || '', // e.g., "16505551234"
           text: message.text.body.trim(), // e.g., "Does it come in another color?"
           profileName: contact?.profile?.name || 'Friend', // e.g., "Sheena Nelson"
+          messageId: message.id || '',
         };
       }
     } catch (error) {
@@ -85,6 +91,60 @@ export class WhatsappService {
     }
   }
 
+  async sendTypingIndicator(recipientNumber: string): Promise<void> {
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = process.env.WHATSAPP_API_TOKEN;
+
+    const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: recipientNumber.replace('+', ''),
+      sender_action: 'typing_on',
+    };
+
+    try {
+      await axios.post(url, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      const error = err as Error;
+      if (axios.isAxiosError(error)) {
+        console.log('Status:', error.response?.status);
+        console.log('Response:', JSON.stringify(error.response?.data, null, 2));
+      }
+
+      throw error;
+    }
+  }
+
+  async markMessageAsRead(messageId: string): Promise<void> {
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = process.env.WHATSAPP_API_TOKEN;
+
+    const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+    };
+
+    try {
+      await axios.post(url, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      const error = err as Error;
+      if (axios.isAxiosError(error)) {
+        console.log('Status:', error.response?.status);
+        console.log('Response:', JSON.stringify(error.response?.data, null, 2));
+      }
+
+      throw error;
+    }
+  }
   /**
    * Process incoming message from a user (new or existing)
    */

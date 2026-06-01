@@ -64,6 +64,13 @@ export class WhatsappController {
       return { status: 'ignored', reason: 'Not a text message event' };
     }
 
+    const senderNumber = messageData.from;
+    const messageId = messageData.messageId;
+
+    if (messageId) {
+      await this.whatsappService.markMessageAsRead(messageId);
+      await this.whatsappService.sendTypingIndicator(senderNumber);
+    }
     // Process the text message through the service layer
     await this.messageHandlerService.handleIncomingPayload(messageData);
     this.whatsappService.processUserMessage(messageData.from, messageData.text);
