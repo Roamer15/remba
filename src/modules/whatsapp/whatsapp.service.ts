@@ -59,21 +59,23 @@ export class WhatsappService {
     }
 
     const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+    const payload = {
+      messaging_product: 'whatsapp',
+      to: to,
+      type: 'template',
+      template: {
+        name: 'hello_world',
+        language: {
+          code: 'en_US',
+        },
+      },
+    };
     try {
-      await axios.post(
-        url,
-        {
-          messaging_product: 'whatsapp',
-          to: to,
-          type: 'text',
-          text: { body: messageBody },
+      await axios.post(url, payload, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      );
+      });
     } catch (err) {
       const error = err as Error;
       this.logger.error('Meta API Transmission Failed', error.message);
