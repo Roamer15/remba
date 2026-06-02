@@ -33,21 +33,25 @@ export class SchedulerService {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
+    // ==========================================
+    // PHASE 1: DISPATCH CURRENT MINUTE REMINDERS
+    // ==========================================
     for (const reminder of activeReminders) {
       try {
-        // DYNAMIC TIMEZONE MATH: Calculate the precise hour for THIS specific user
-        const userOffset = reminder.user.timezoneOffset; // e.g. +1 or -4
+        const userOffset = reminder.user.timezoneOffset; // e.g. 1 or -4
 
+        // DYNAMIC TIMEZONE MATH: Cleanly compute local time string matching user's offset
         const userLocalDate = new Date(
           baseServerDate.getTime() + userOffset * 60 * 60 * 1000,
         );
 
+        // Force strict double-digit string formatting from the shifted date
         const userHours = String(userLocalDate.getUTCHours()).padStart(2, '0');
         const userMinutes = String(userLocalDate.getUTCMinutes()).padStart(
           2,
           '0',
         );
-        const computedUserTime = `${userHours}:${userMinutes}`; // e.g. "08:00"
+        const computedUserTime = `${userHours}:${userMinutes}`; // Guarantees "16:33" or "20:00"
 
         // Only fire if the computed local time matches their requested alarm string!
         if (reminder.reminderTime !== computedUserTime) {
@@ -71,6 +75,7 @@ export class SchedulerService {
         const alertMessage = isFrench
           ? `Bonjour ${userName}, il est ${reminder.reminderTime} et c'est l'heure de prendre votre ${reminder.medicationName}. N'oubliez pas que prendre votre traitement régulièrement est important pour votre santé. Veuillez répondre "TAKEN" lorsque vous aurez pris votre dose pour que je puisse suivre votre progression 😊`
           : `Hi ${userName}, it's ${reminder.reminderTime} and time for you to take your ${reminder.medicationName}. Remember taking your medication is important for your long-term health. Please when done taking your medication respond to me with "TAKEN" so I can track your streak 😊`;
+
         await this.prisma.doseLog.create({
           data: { reminderId: reminder.id, status: 'PENDING' },
         });
@@ -79,71 +84,76 @@ export class SchedulerService {
           reminder.userPhoneNumber,
           alertMessage,
         );
+
         this.logger.log(
           `Alert delivered dynamically for localized zone matching time: ${computedUserTime}`,
         );
+      } catch (err) {
+        this.logger.error(
+          `Failed processing operational timing loop for reminder ${reminder.id}`,
+          err,
+        );
+      }
+    }
 
-        // Inside src/modules/scheduler/scheduler.service.ts -> handleMedicationAlerts()
+    // ==========================================
+    // PHASE 2: SWEEP ABANDONED LOGS (OUTSIDE MAIN LOOP)
+    // ==========================================
+    try {
+      const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000);
 
-        // Calculate the point in time exactly 5 hours ago
-        const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000);
-
-        // Find all pending logs that have been left abandoned past this window
-        const abandonedLogs = await this.prisma.doseLog.findMany({
-          where: {
-            status: 'PENDING',
-            timestamp: { lt: fiveHoursAgo },
+      const abandonedLogs = await this.prisma.doseLog.findMany({
+        where: {
+          status: 'PENDING',
+          timestamp: { lt: fiveHoursAgo },
+        },
+        include: {
+          reminder: {
+            include: { user: true },
           },
-          include: {
-            reminder: {
-              include: {
-                user: true,
+        },
+      });
+
+      for (const log of abandonedLogs) {
+        try {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.doseLog.update({
+              where: { id: log.id },
+              data: {
+                status: 'SKIPPED',
+                notes: 'Auto-skipped: No user response within 5 hours.',
               },
-            },
-          },
-        });
-
-        // Automatically sweep abandoned items to SKIPPED status and reset streaks
-        for (const log of abandonedLogs) {
-          try {
-            await this.prisma.$transaction(async (tx) => {
-              // 1. Mark the log as skipped
-              await tx.doseLog.update({
-                where: { id: log.id },
-                data: {
-                  status: 'SKIPPED',
-                  notes: 'Auto-skipped: No user response within 5 hours.',
-                },
-              });
-
-              // 2. Reset that medication's streak count back to 0
-              await tx.reminder.update({
-                where: { id: log.reminderId },
-                data: { streakCount: 0 },
-              });
             });
 
-            this.logger.log(
-              `[TIMEOUT ENGINE] Auto-skipped expired log ${log.id} for reminder ${log.reminderId}`,
-            );
+            await tx.reminder.update({
+              where: { id: log.reminderId },
+              data: { streakCount: 0 },
+            });
+          });
 
-            const userLanguage =
-              (log.reminder.user?.language as 'EN' | 'FR') || 'EN';
-            await this.checkAndTriggerEscalation(
-              log.reminder.userPhoneNumber,
-              log.reminder.user?.name || 'Patient',
-              userLanguage,
-            );
-          } catch (sweepError) {
-            this.logger.error(
-              `Failed auto-skipping expired log reference ${log.id}`,
-              sweepError,
-            );
-          }
+          this.logger.log(
+            `[TIMEOUT ENGINE] Auto-skipped expired log ${log.id} for reminder ${log.reminderId}`,
+          );
+
+          const userLanguage =
+            (log.reminder.user?.language as 'EN' | 'FR') || 'EN';
+          await this.checkAndTriggerEscalation(
+            log.reminder.userPhoneNumber,
+            log.reminder.user?.name || 'Patient',
+            userLanguage,
+          );
+        } catch (sweepError) {
+          this.logger.error(
+            `Failed auto-skipping expired log reference ${log.id}`,
+            sweepError,
+          );
         }
-      } catch (err) {
-        this.logger.error(`Failed processing operational timing loop`, err);
       }
+    } catch (timeoutEngineError) {
+      this.logger.error(
+        `Failed running timeout sweeping engine execution pass`,
+        timeoutEngineError,
+      );
     }
   }
 

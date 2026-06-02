@@ -1,4 +1,3 @@
-// src/whatsapp/message-handler.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma.service';
 import { OpenaiService } from 'src/openai/openai.service';
@@ -23,7 +22,6 @@ export class MessageHandlerService {
    */
   async handleIncomingPayload(payload: IncomingMessagePayload): Promise<void> {
     const { from, text, profileName } = payload;
-    // 1. Check if user already exists in the database
     const user = await this.prisma.user.findUnique({
       where: { phoneNumber: from },
     });
@@ -32,14 +30,11 @@ export class MessageHandlerService {
         `New user detected from number: ${from}. Running onboarding engine...`,
       );
 
-      // 2. Execute Day 2 AI logic
       const onboardingData = await this.openaiService.processNewUserOnboarding(
         text,
         profileName,
       );
 
-      // 3. Persist user using upsert to prevent race condition
-      // If another request already created the user, this will just retrieve it
       await this.prisma.user.upsert({
         where: { phoneNumber: from },
         create: {
@@ -47,11 +42,9 @@ export class MessageHandlerService {
           name: onboardingData.cleanedName,
           language: onboardingData.detectedLanguage,
         },
-        update: {}, // Don't update if already exists
+        update: {},
       });
 
-      // 4. Send back the warm welcome text through Meta Cloud API
-      // Wrap in try-catch to prevent failed messages from breaking the flow
       try {
         await this.whatsappService.sendWhatsAppPayload(
           from,
@@ -62,7 +55,6 @@ export class MessageHandlerService {
           `Failed to send greeting to ${from}, but user was successfully created`,
           error instanceof Error ? error : new Error(String(error)),
         );
-        // Don't re-throw - user is created, greeting delivery is best-effort
       }
       return;
     }
@@ -73,7 +65,6 @@ export class MessageHandlerService {
 
     const upperText = text.trim().toUpperCase();
 
-    // Global Help & Command Directory
     if (upperText === 'HELP' || upperText === 'MENU' || upperText === 'AIDE') {
       this.logger.log(`User ${from} requested the command directory matrix.`);
 
@@ -105,9 +96,6 @@ export class MessageHandlerService {
       return;
     }
 
-    // Add this condition directly underneath your HELP/MENU check inside handleIncomingPayload()
-
-    // 🔥 NEW ROUTE: Automated Mentor Registration & Relational Assignment
     if (upperText.startsWith('MENTOR')) {
       this.logger.log(
         `User ${from} is attempting a mentor relationship mapping linking operation...`,
@@ -115,8 +103,6 @@ export class MessageHandlerService {
 
       const isFrench = user.language === 'FR';
 
-      // Split the incoming text string by spaces to pull the individual parameters
-      // Input format example: MENTOR SirMoses 237671234567
       const messageParts = text.trim().split(/\s+/);
 
       if (messageParts.length < 3) {
@@ -136,7 +122,6 @@ export class MessageHandlerService {
 
       try {
         await this.prisma.$transaction(async (tx) => {
-          // 1. Find or create the mentor row inside your database (prevents duplication of mentors)
           const mentorRecord = await tx.mentor.upsert({
             where: { phoneNumber: extractedMentorPhone },
             create: {
@@ -144,11 +129,10 @@ export class MessageHandlerService {
               phoneNumber: extractedMentorPhone,
             },
             update: {
-              name: extractedMentorName, // Updates name if their contact number was already logged
+              name: extractedMentorName,
             },
           });
 
-          // 2. Safely link this patient profile directly to that mentor record via their unique foreign key ID
           await tx.user.update({
             where: { phoneNumber: from },
             data: {
@@ -186,7 +170,6 @@ export class MessageHandlerService {
       return;
     }
 
-    // Keyword Demand for Health Analytics
     if (upperText === 'REPORT' || upperText === 'BILAN') {
       this.logger.log(
         `User ${from} requested on-demand metrics. Routing to AnalyticsService...`,
@@ -195,15 +178,36 @@ export class MessageHandlerService {
       return;
     }
 
-    // If they are replying to a medication alarm check-in
     if (upperText === 'TAKEN' || upperText.startsWith('SKIP')) {
-      this.logger.log(`Routing ${from} to Day 5 Adherence Engine...`);
+      this.logger.log(`Routing ${from} to Adherence Engine...`);
       await this.processAdherenceCheckIn(user, text);
       return;
     }
+    this.logger.log(
+      `Analyzing conversational intent for user: ${user.name || from}`,
+    );
+    const userLanguage = (user.language as 'EN' | 'FR') || 'EN';
 
-    // Default to assuming they are attempting to add a new medication schedule
-    this.logger.log(`Routing ${from} to Day 3 Medication Extraction Engine...`);
+    const classification =
+      await this.openaiService.classifyAndHandleConversation(
+        text,
+        user.name || 'Friend',
+        userLanguage,
+      );
+
+    if (classification.type === 'CHAT') {
+      this.logger.log(
+        `User interaction categorized as casual conversation. Dispatching care response.`,
+      );
+      await this.whatsappService.sendWhatsAppPayload(
+        from,
+        classification.responseText ??
+          'Sorry, I could not generate a response right now. Please try again.',
+      );
+      return;
+    }
+
+    this.logger.log(`Routing ${from} to Medication Extraction Engine...`);
     await this.processExistingUserConversation(user, text);
   }
 
@@ -216,14 +220,12 @@ export class MessageHandlerService {
   ): Promise<void> {
     const language = (user.language as 'EN' | 'FR') || 'EN';
 
-    // Invoke the OpenAI parsing script
     const extraction = await this.openaiService.extractMedicationSchedules(
       text,
       language,
       user.name || 'Friend',
     );
 
-    // Guardrail Catch: If no medication reminders were detected (conversational inputs)
     if (extraction.remindersFound.length === 0) {
       await this.whatsappService.sendWhatsAppPayload(
         user.phoneNumber,
@@ -267,9 +269,7 @@ export class MessageHandlerService {
       return;
     }
 
-    // Persistent Relational Save Loop via Prisma Client
     try {
-      // We map the array records into a structured transaction block
       await this.prisma.user.update({
         where: { phoneNumber: user.phoneNumber },
         data: {
@@ -286,7 +286,6 @@ export class MessageHandlerService {
         `Successfully linked ${extraction.remindersFound.length} medication items to phone profile: ${user.phoneNumber}`,
       );
 
-      // Send back the clean conversational confirmation text generated by OpenAI
       let finalMessage = extraction.confirmationMessage;
       if (duplicateReminders.length > 0) {
         const partialWarning =
@@ -306,7 +305,6 @@ export class MessageHandlerService {
         error instanceof Error ? error : new Error(String(error)),
       );
 
-      // Graceful error response handling fallback as specified in your interview design parameters
       const systemErrorMessage =
         language === 'FR'
           ? "Oups, un problème technique est survenu. Veuillez réessayer d'enregistrer votre médicament."
@@ -319,8 +317,6 @@ export class MessageHandlerService {
     }
   }
 
-  // src/modules/whatsapp/message-handler.service.ts
-
   private async processAdherenceCheckIn(
     user: User,
     text: string,
@@ -328,14 +324,12 @@ export class MessageHandlerService {
     const language = (user.language as 'EN' | 'FR') || 'EN';
     const cleanInput = text.trim().toUpperCase();
 
-    // 1. Process intent classification using our Day 5 OpenAI engine
     const analysis = await this.openaiService.parseAdherenceResponse(
       cleanInput,
       language,
       user.name || 'Friend',
     );
 
-    // If it's unrelated conversation, let the AI's default motivational response handle the feedback loop
     if (analysis.intent === 'UNKNOWN') {
       await this.whatsappService.sendWhatsAppPayload(
         user.phoneNumber,
@@ -344,7 +338,6 @@ export class MessageHandlerService {
       return;
     }
 
-    // 2. Query Prisma for the most recent PENDING dose log entry for this phone number
     const latestPendingLog = await this.prisma.doseLog.findFirst({
       where: {
         status: 'PENDING',
@@ -360,7 +353,6 @@ export class MessageHandlerService {
       },
     });
 
-    // Guard check: If they reply TAKEN but no alert was active, tell them gently
     if (!latestPendingLog) {
       const nonPendingMessage =
         language === 'FR'
@@ -374,7 +366,6 @@ export class MessageHandlerService {
       return;
     }
 
-    // 3. Time Precedence Calculations (Your Fixed Blueprint)
     const alertTime = new Date(latestPendingLog.timestamp).getTime();
     const replyTime = new Date().getTime();
     const diffInMinutes = Math.floor((replyTime - alertTime) / (1000 * 60));
@@ -385,17 +376,14 @@ export class MessageHandlerService {
       if (diffInMinutes > 60 && diffInMinutes <= 240) {
         finalStatus = 'TAKEN_LATE';
       } else if (diffInMinutes > 240) {
-        // If they reply TAKEN but it's been more than 4 hours, it's clinically considered SKIPPED/Missed
         finalStatus = 'SKIPPED';
       }
     } else if (analysis.intent === 'SKIP') {
       finalStatus = 'SKIPPED';
     }
 
-    // 4. Update Database Log and Streaks cleanly using Prisma Transaction Blocks
     try {
       await this.prisma.$transaction(async (tx) => {
-        // Update the state logs status and notes column field
         await tx.doseLog.update({
           where: { id: latestPendingLog.id },
           data: {
@@ -404,14 +392,12 @@ export class MessageHandlerService {
           },
         });
 
-        // Manage Streak Counters dynamically based on compliance rules
         if (finalStatus === 'TAKEN') {
           await tx.reminder.update({
             where: { id: latestPendingLog.reminderId },
             data: { streakCount: { increment: 1 } },
           });
         } else if (finalStatus === 'SKIPPED') {
-          // Reset streak calculation safely on missed parameters
           await tx.reminder.update({
             where: { id: latestPendingLog.reminderId },
             data: { streakCount: 0 },
@@ -419,7 +405,6 @@ export class MessageHandlerService {
         }
       });
 
-      // 5. Send back OpenAI's contextual motivational validation payload feedback text
       await this.whatsappService.sendWhatsAppPayload(
         user.phoneNumber,
         analysis.motivationalResponse,

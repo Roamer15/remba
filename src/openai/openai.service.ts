@@ -290,4 +290,146 @@ export class OpenaiService {
         : 'Here is your weekly health summary review: Please continue prioritizing your dosage timing daily!';
     }
   }
+
+  async generateHumanResponse(
+    userMessage: string,
+    contextHistory: string = '',
+  ): Promise<string> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba, an empathetic, supportive, and highly professional AI medical prescription companion. 
+            Your goal is to help users manage their medications without sounding like a rigid machine.
+            
+            GUIDELINES:
+            1. Speak naturally, warmly, and politely—like a caring healthcare assistant.
+            2. If the user greets you or asks vague questions, respond conversationally but gently guide them to share their medication names, dosages, or scheduling worries.
+            3. Keep your answers concise, clear, and easy to read on a mobile WhatsApp screen (use short paragraphs or bullet points where appropriate).
+            4. Never give definitive diagnostic medical judgments. Always maintain a safe, supportive boundary.`,
+          },
+          {
+            role: 'user',
+            content: `User Context/History: ${contextHistory}\nNew Inbound Message: "${userMessage}"`,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 250,
+      });
+
+      return (
+        response.choices[0].message.content ||
+        "I'm here to help. Could you please share your prescription or medication details?"
+      );
+    } catch (error) {
+      this.logger.error('OpenAI API Generation Error', error);
+      return "Thank you for reaching out to Remba. I'm reviewing your request, please tell me more about your medication details.";
+    }
+  }
+
+  /**
+   * Generates a warm, empathetic response for general user queries
+   * while gracefully refocusing them on Remba's core tracking features.
+   */
+  async generateConversationalCareResponse(
+    userMessage: string,
+    userName: string,
+    language: 'EN' | 'FR' = 'EN',
+  ): Promise<string> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba, a deeply compassionate, warm, and professional AI medical companion. 
+            A user has messaged you with a query or statement that falls outside of direct medication compliance updates.
+
+            YOUR TASKS:
+            1. Respond with genuine empathy, care, and a human-like tone based on what they said (e.g., if they feel bad, comfort them; if they ask a general question, answer warmly).
+            2. Gracefully disregard irrelevant or advanced clinical diagnostic queries by indicating that your main purpose is to help them track and stay regular with their medications (Remba's core mission).
+            3. Explicitly pivot back to their health routine or check-ins. Keep the message concise, highly supportive, and easy to read on a mobile WhatsApp screen.
+            4. Respond entirely in the user's language constraint: ${language}.`,
+          },
+          {
+            role: 'user',
+            content: `User Name: ${userName}\nIncoming Message: "${userMessage}"`,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 200,
+      });
+
+      return (
+        response.choices[0].message.content ||
+        (language === 'FR'
+          ? `Je suis là pour vous accompagner dans votre traitement. Prenons soin de votre santé ensemble !`
+          : `I am right here to help you manage your treatment. Let's take care of your health together!`)
+      );
+    } catch (error) {
+      this.logger.error(
+        'Failed generating care fallback response stream',
+        error,
+      );
+      return language === 'FR'
+        ? `Merci pour votre message. Continuons à suivre votre calendrier de traitement régulièrement.`
+        : `Thank you for your message. Let's stay focused on keeping your medication schedule perfectly on track.`;
+    }
+  }
+
+  /**
+   * Evaluates if an existing user's free text is a clear instruction to schedule
+   * a medication or just general conversational context/questions.
+   */
+  async classifyAndHandleConversation(
+    userMessage: string,
+    userName: string,
+    language: 'EN' | 'FR' = 'EN',
+  ): Promise<{ type: 'SCHEDULE' | 'CHAT'; responseText?: string }> {
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are Remba's conversational routing intelligence router. Your job is to classify an incoming message from a patient.
+            
+            Determine if the user is trying to add/register a new medication schedule (e.g., "Add Paracetamol", "Take pill at 8am", "I have a new prescription for Amoxicillin").
+            - If they ARE trying to add a medication, return a strict JSON block: { "type": "SCHEDULE" }
+            
+            - If they are asking a question, venting, greeting you, or talking about something else (e.g., side effects, food interactions, general questions, greetings), return: { "type": "CHAT", "responseText": "Your empathetic response here" }
+
+            CHAT RULES:
+            1. Respond with genuine empathy and care as a supportive medical companion.
+            2. Gracefully disregard clinical diagnostic queries or completely irrelevant topics by explaining that your core mission is to help them track and stay regular with their medication schedules.
+            3. Pivot back to their routine or check-ins. Keep it concise for a mobile screen.
+            4. Respond entirely in the user's language: ${language}.`,
+          },
+          {
+            role: 'user',
+            content: `User Name: ${userName}\nMessage: "${userMessage}"`,
+          },
+        ],
+        temperature: 0.5,
+        response_format: { type: 'json_object' },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const result = JSON.parse(response.choices[0].message.content || '{}');
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        type: result.type || 'CHAT',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        responseText: result.responseText as string,
+      };
+    } catch (error) {
+      this.logger.error(
+        'Failed to classify casual user interaction mapping',
+        error,
+      );
+      return { type: 'SCHEDULE' };
+    }
+  }
 }
