@@ -33,31 +33,23 @@ export class SchedulerService {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    // ==========================================
-    // PHASE 1: DISPATCH CURRENT MINUTE REMINDERS
-    // ==========================================
     for (const reminder of activeReminders) {
       try {
-        const userOffset = reminder.user.timezoneOffset; // e.g. 1 or -4
+        const now = new Date();
+        const userOffset = reminder.user.timezoneOffset;
 
-        // DYNAMIC TIMEZONE MATH: Cleanly compute local time string matching user's offset
-        const userLocalDate = new Date(
-          baseServerDate.getTime() + userOffset * 60 * 60 * 1000,
-        );
+        let localHour = now.getUTCHours() + userOffset;
+        localHour = ((localHour % 24) + 24) % 24;
+        const localMinutes = now.getUTCMinutes();
 
-        // Force strict double-digit string formatting from the shifted date
-        const userHours = String(userLocalDate.getUTCHours()).padStart(2, '0');
-        const userMinutes = String(userLocalDate.getUTCMinutes()).padStart(
-          2,
-          '0',
-        );
-        const computedUserTime = `${userHours}:${userMinutes}`; // Guarantees "16:33" or "20:00"
+        const computedUserTime = `${String(localHour).padStart(2, '0')}:${String(localMinutes).padStart(2, '0')}`;
 
-        // Only fire if the computed local time matches their requested alarm string!
         if (reminder.reminderTime !== computedUserTime) {
+          this.logger.debug(
+            `Mismatch: DB=${reminder.reminderTime}, computed=${computedUserTime}, offset=${userOffset}, utc=${baseServerDate.toISOString()}`,
+          );
           continue;
         }
-
         // Idempotency check
         const existingLog = await this.prisma.doseLog.findFirst({
           where: {
