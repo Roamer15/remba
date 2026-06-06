@@ -75,22 +75,22 @@ export class MessageHandlerService {
           `• *TAKEN* : Confirmez que vous avez pris votre dose actuelle.\n` +
           `• *SKIP* : Indiquez une omission (ex: "SKIP j'ai oublié").\n` +
           `• *BILAN* ou *REPORT* : Recevez votre rapport de santé hebdomadaire.\n` +
-          `• *HELP* ou *MENU* : Réaffichez ce guide.\n\n` +
+          `• *AIDE* ou *MENU* : Réaffichez ce guide.\n\n` +
           `👥 *AJOUTER UN ENCADRANT / GARDE MALADE :*\n` +
           `Écrivez : *MENTOR [Nom] [Numéro]*\n` +
           `_(Exemple : MENTOR JohnDoe 2376XXXXXXXXX)_\n\n` +
-          `💊 *AJOUTER UN MÉDICAMENT :*\n` +
+          `*AJOUTER UN MÉDICAMENT :*\n` +
           `Écrivez simplement vos détails naturellement (ex: "Prendre Paracétamol à 8h et 20h").`
-        : `📋 *REMBA COMMAND DIRECTORY* 📋\n\n` +
+        : `*REMBA COMMAND DIRECTORY*\n\n` +
           `Here are the keywords you can use to interact with me:\n\n` +
           `• *TAKEN* : Confirm you have successfully taken your current dose.\n` +
           `• *SKIP* : Log a missed dose along with your reason (e.g., "SKIP ran out of stock").\n` +
           `• *REPORT* or *BILAN* : Instantly pull down your 7-day health performance report.\n` +
           `• *HELP* or *MENU* : Pull up this command directory guide.\n\n` +
-          `👥 *TO ADD A HEALTH MENTOR / SUPPORTER / CARETAKER(We'll reach out to them if you don't take your medication properly) :*\n` +
+          `*TO ADD A HEALTH MENTOR / SUPPORTER / CARETAKER(We'll reach out to them if you don't take your medication properly) :*\n` +
           `Type: *MENTOR [Name] [PhoneNumber]*\n` +
           `_(Example: MENTOR JohnDoe 2376XXXXXXXXX)_\n\n` +
-          `💊 *REGISTER A NEW MEDICATION :*\n` +
+          `*REGISTER A NEW MEDICATION :*\n` +
           `Type your instructions naturally (e.g., "I need to take Amoxicillin at 8am and 8pm").`;
       await this.whatsappService.sendWhatsAppPayload(from, directoryMessage);
       return;
@@ -107,8 +107,8 @@ export class MessageHandlerService {
 
       if (messageParts.length < 3) {
         const formattingErrorMessage = isFrench
-          ? `⚠️ *Format Invalide !*\nVeuillez utiliser le format exact suivant :\n*MENTOR [Nom] [Numéro]*\n_(Ex: MENTOR SirMoses 2376XXXXXXXXX)_`
-          : `⚠️ *Invalid Format !*\nPlease use this exact structural layout format:\n*MENTOR [Name] [PhoneNumber]*\n_(e.g., MENTOR JamesAkaba 2376XXXXXXXXX)_`;
+          ? `*Format Invalide !*\nVeuillez utiliser le format exact suivant :\n*MENTOR [Nom] [Numéro]*\n_(Ex: MENTOR JohnDoe 2376XXXXXXXXX)`
+          : `*Invalid Format !*\nPlease use this exact structural layout format:\n*MENTOR [Name] [PhoneNumber]*\n_(e.g., MENTOR JohnDoe 2376XXXXXXXXX)`;
 
         await this.whatsappService.sendWhatsAppPayload(
           from,

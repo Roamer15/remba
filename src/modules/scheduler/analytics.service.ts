@@ -86,8 +86,8 @@ export class AnalyticsService {
       // 5. Structure the complete dashboard visualization presentation string
       const reportHeader =
         languageCode === 'FR'
-          ? `📊 *BILAN DE SANTÉ HEBDOMADAIRE* 📊\n--------------------------------\n• Taux d'observance : ${adherenceRate}%\n• Taux d'omission (Skip) : ${skipRate}%\n• Taux de retard : ${lateRate}%\n• Total des doses attendues : ${totalExpectedDoses}\n\n📝 *Rapport Médical de Remba :*\n`
-          : `📊 *WEEKLY MEDICAL DASHBOARD REPORT* 📊\n--------------------------------\n• Adherence Score: ${adherenceRate}%\n• Skip Barrier Rate: ${skipRate}%\n• Delay/Late Rate: ${lateRate}%\n• Total Logged Trackers: ${totalExpectedDoses}\n\n📝 *Remba Clinical Review :*\n`;
+          ? ` *BILAN DE SANTÉ HEBDOMADAIRE* \n--------------------------------\n• Taux d'observance : ${adherenceRate}%\n• Taux d'omission (Skip) : ${skipRate}%\n• Taux de retard : ${lateRate}%\n• Total des doses attendues : ${totalExpectedDoses}\n\n📝 *Rapport Médical de Remba :*\n`
+          : ` *WEEKLY MEDICAL DASHBOARD REPORT* \n--------------------------------\n• Adherence Score: ${adherenceRate}%\n• Skip Barrier Rate: ${skipRate}%\n• Delay/Late Rate: ${lateRate}%\n• Total Logged Trackers: ${totalExpectedDoses}\n\n📝 *Remba Clinical Review :*\n`;
 
       const completeReportText = `${reportHeader}${reviewNarrative}`;
 

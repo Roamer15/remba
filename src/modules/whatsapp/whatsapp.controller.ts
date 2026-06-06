@@ -71,7 +71,6 @@ export class WhatsappController {
     }
     // Process the text message through the service layer
     await this.messageHandlerService.handleIncomingPayload(messageData);
-    this.whatsappService.processUserMessage(messageData.from, messageData.text);
 
     return { status: 'success' };
   }

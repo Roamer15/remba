@@ -54,6 +54,7 @@ export class WhatsappService {
     // Validate required environment variables
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = process.env.WHATSAPP_API_TOKEN;
+    const graphUrl = process.env.FACEBOOK_ENTRY_URL;
 
     if (!phoneNumberId) {
       throw new Error(
@@ -63,8 +64,11 @@ export class WhatsappService {
     if (!accessToken) {
       throw new Error('WHATSAPP_ACCESS_TOKEN environment variable is not set');
     }
+    if (!graphUrl) {
+      throw new Error('FACEBOOK_ENTRY_URL environment variable is not set');
+    }
 
-    const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+    const url = `${graphUrl}/${phoneNumberId}/messages`;
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -83,8 +87,11 @@ export class WhatsappService {
     } catch (err) {
       const error = err as Error;
       if (axios.isAxiosError(error)) {
-        console.log('Status:', error.response?.status);
-        console.log('Response:', JSON.stringify(error.response?.data, null, 2));
+        this.logger.error('Status:', error.response?.status);
+        this.logger.error(
+          'Response:',
+          JSON.stringify(error.response?.data, null, 2),
+        );
       }
 
       throw error;
@@ -94,8 +101,14 @@ export class WhatsappService {
   async sendTypingIndicator(messageId: string): Promise<void> {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_API_TOKEN;
+    const graphUrl = process.env.FACEBOOK_ENTRY_URL;
+    if (!phoneNumberId || !token || !graphUrl) {
+      this.logger.log(
+        'Either WHATSAPP_PHONE_NUMBER or WHATSAPP_API_TOKEN or FACEBOOK_ENTRY_URL is missing',
+      );
+    }
 
-    const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+    const url = `${graphUrl}/${phoneNumberId}/messages`;
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -124,8 +137,14 @@ export class WhatsappService {
   async markMessageAsRead(messageId: string): Promise<void> {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_API_TOKEN;
+    const graphUrl = process.env.FACEBOOK_ENTRY_URL;
+    if (!phoneNumberId || !token || !graphUrl) {
+      this.logger.log(
+        'Either WHATSAPP_PHONE_NUMBER or WHATSAPP_API_TOKEN or FACEBOOK_ENTRY_URL is missing',
+      );
+    }
 
-    const url = `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`;
+    const url = `${graphUrl}/${phoneNumberId}/messages`;
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -140,17 +159,14 @@ export class WhatsappService {
     } catch (err) {
       const error = err as Error;
       if (axios.isAxiosError(error)) {
-        console.log('Status:', error.response?.status);
-        console.log('Response:', JSON.stringify(error.response?.data, null, 2));
+        this.logger.error('Status:', error.response?.status);
+        this.logger.error(
+          'Response:',
+          JSON.stringify(error.response?.data, null, 2),
+        );
       }
 
       throw error;
     }
-  }
-  /**
-   * Process incoming message from a user (new or existing)
-   */
-  processUserMessage(phoneNumber: string, message: string): void {
-    this.logger.log(`Processing message from ${phoneNumber}: "${message}"`);
   }
 }

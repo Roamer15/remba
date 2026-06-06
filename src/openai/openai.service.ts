@@ -5,6 +5,7 @@ import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-res
 import { ScheduleExtractionResult } from './interfaces/schedule-interaction.interface';
 import { AdherenceExtractionResult } from './interfaces/adherence-extraction.interface';
 import { WeeklyMetrics } from './interfaces/weekly-report.interface';
+import { ChatCompletionMessageParam } from 'openai/resources.js';
 
 @Injectable()
 export class OpenaiService {
@@ -22,6 +23,111 @@ export class OpenaiService {
   }
 
   /**
+   * Calls OpenAI API with JSON structured output format.
+   * Used for extracting and parsing structured data (schedules, adherence, classifications).
+   * Enforces valid JSON responses matching a defined schema.
+   */
+  private async callJsonStructuredApi(
+    messages: ChatCompletionMessageParam[],
+    temperature: number,
+  ) {
+    return await this.openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      response_format: { type: 'json_object' },
+      temperature,
+    });
+  }
+
+  /**
+   * Calls OpenAI API for unstructured conversational responses.
+   * Used for generating natural language replies without strict JSON constraints.
+   */
+  private async callUnstructuredApi(
+    messages: ChatCompletionMessageParam[],
+    temperature: number,
+    maxTokens?: number,
+  ) {
+    return await this.openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      temperature,
+      ...(maxTokens && { max_tokens: maxTokens }),
+    });
+  }
+
+  /**
+   * Utility function to pause execution for a specified duration in milliseconds.
+   * Used to implement exponential backoff or delays between retry attempts.
+   */
+  private async sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Calls OpenAI API with JSON structured output and automatic retry logic.
+   * Retries with exponential backoff if empty responses are received.
+   * @param messages - ChatCompletion messages array
+   * @param temperature - Model temperature for response generation
+   * @param maxRetries - Maximum number of retry attempts (default: 3)
+   * @param baseDelayMs - Initial delay in milliseconds before first retry (default: 500ms)
+   * @returns OpenAI API response or throws error after max retries exhausted
+   */
+  private async callJsonStructuredApiWithRetry(
+    messages: ChatCompletionMessageParam[],
+    temperature: number,
+    maxRetries: number = 3,
+    baseDelayMs: number = 500,
+  ) {
+    let lastError: Error | null = null;
+    let delayMs = baseDelayMs;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.callJsonStructuredApi(
+          messages,
+          temperature,
+        );
+        const content = response.choices?.[0]?.message?.content;
+
+        if (content) {
+          if (attempt > 0) {
+            this.logger.log(
+              `Successfully retrieved content on attempt ${attempt + 1}/${maxRetries + 1}`,
+            );
+          }
+          return response;
+        }
+
+        // Content is empty, retry if attempts remaining
+        if (attempt < maxRetries) {
+          this.logger.warn(
+            `Attempt ${attempt + 1}/${maxRetries + 1}: Empty response from OpenAI, retrying in ${delayMs}ms`,
+          );
+          await this.sleep(delayMs);
+          delayMs = Math.min(delayMs * 2, 5000); // Exponential backoff, cap at 5s
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < maxRetries) {
+          this.logger.warn(
+            `Attempt ${attempt + 1}/${maxRetries + 1}: API call failed, retrying in ${delayMs}ms`,
+            lastError,
+          );
+          await this.sleep(delayMs);
+          delayMs = Math.min(delayMs * 2, 5000); // Exponential backoff, cap at 5s
+        }
+      }
+    }
+
+    // All retries exhausted
+    throw (
+      lastError ||
+      new Error('No content returned from OpenAI after all retry attempts')
+    );
+  }
+
+  /**
    * Parses the first message from a stranger to determine language, clean their profile name,
    * and generate an empathetic localized greeting.
    */
@@ -33,13 +139,10 @@ export class OpenaiService {
       // Sanitize user inputs to prevent prompt injection
       const sanitizedMessage = this.sanitizeInput(rawMessage);
       const sanitizedName = this.sanitizeInput(whatsappProfileName);
-
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, a warm, professional virtual health companion in Cameroon assisting patients with chronic conditions (HIV, TB, hypertension).
+      const messagePayload = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, a warm, professional virtual health companion in Cameroon assisting patients with chronic conditions (HIV, TB, hypertension).
             
             Your task is to parse onboarding details from a new user payload and respond with a strict JSON format.
             
@@ -54,15 +157,17 @@ export class OpenaiService {
               "cleanedName": "string",
               "greetingResponse": "string"
             }`,
-          },
-          {
-            role: 'user',
-            content: `WhatsApp Profile Name: "${sanitizedName}"\nUser Message: "${sanitizedMessage}"`,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `WhatsApp Profile Name: "${sanitizedName}"\nUser Message: "${sanitizedMessage}"`,
+        },
+      ];
+
+      const response = await this.callJsonStructuredApiWithRetry(
+        messagePayload,
+        0.3,
+      );
 
       // Safely access response with optional chaining and null coalescing
       const content = response.choices?.[0]?.message?.content;
@@ -111,14 +216,12 @@ export class OpenaiService {
     userName: string,
   ): Promise<ScheduleExtractionResult> {
     try {
+      const MAX_NUMBER_OF_RETRIES = 3;
       const sanitizedMessage = this.sanitizeInput(incomingText);
-
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, a helpful, empathetic medication scheduling assistant. Your job is to extract medication names and precise times from natural text.
+      const messagePayload = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, a helpful, empathetic medication scheduling assistant. Your job is to extract medication names and precise times from natural text.
             
             Context: You are talking to a patient named ${userName}. Their preferred language code is ${language}. You MUST respond in this language.
             
@@ -138,17 +241,20 @@ export class OpenaiService {
               ],
               "confirmationMessage": "string"
             }`,
-          },
-          {
-            role: 'user',
-            content: `Message to parse: "${sanitizedMessage}"`,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.1, // Keep temperature low for maximum structural accuracy
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `Message to parse: "${sanitizedMessage}"`,
+        },
+      ];
 
+      const response = await this.callJsonStructuredApiWithRetry(
+        messagePayload,
+        0.1,
+        MAX_NUMBER_OF_RETRIES,
+      );
       const content = response.choices?.[0]?.message?.content;
+
       if (!content) {
         throw new Error(
           'No content returned from OpenAI schedule extraction token payload',
@@ -183,12 +289,10 @@ export class OpenaiService {
     userName: string,
   ): Promise<AdherenceExtractionResult> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, an empathetic virtual health companion in Cameroon tracking patient adherence for chronic therapies.
+      const message = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, an empathetic virtual health companion in Cameroon tracking patient adherence for chronic therapies.
             
             Analyze the user's reply text and determine their action intent.
             
@@ -212,17 +316,16 @@ export class OpenaiService {
               "skipReasonNotes": "string" | null,
               "motivationalResponse": "string"
             }`,
-          },
-          {
-            role: 'user',
-            content: `Patient Name: ${userName}\nMessage: "${incomingText}"`,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.2,
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `Patient Name: ${userName}\nMessage: "${incomingText}"`,
+        },
+      ];
 
+      const response = await this.callJsonStructuredApiWithRetry(message, 0.2);
       const content = response.choices?.[0]?.message?.content;
+
       if (!content) throw new Error('Empty payload exception');
 
       return JSON.parse(content) as AdherenceExtractionResult;
@@ -251,12 +354,10 @@ export class OpenaiService {
     userName: string,
   ): Promise<string> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, a firm yet compassionate virtual medical specialist tracking treatment logs in Cameroon.
+      const messages = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, a firm yet compassionate virtual medical specialist tracking treatment logs in Cameroon.
             
             You are writing a weekly health summary review for a patient named ${userName}. Language preference: ${language}.
             
@@ -266,18 +367,17 @@ export class OpenaiService {
             3. PERFECT COMPLIANCE (Adherence 95% - 100%): Use a warm, celebratory, high-energy tone. Express absolute pride, congratulate their amazing milestone streak, and encourage them to continue maintaining this gold standard for their long-term health.
             
             Keep the content punchy, empathetic but direct, and restricted entirely to the medical domain (max 4-5 sentences). Do not wrap inside JSON, return the raw message string output directly.`,
-          },
-          {
-            role: 'user',
-            content: `Weekly Performance Figures for ${userName}:
+        },
+        {
+          role: 'user' as const,
+          content: `Weekly Performance Figures for ${userName}:
             - Adherence Rate: ${metrics.adherenceRate}%
             - Skip Rate: ${metrics.skipRate}%
             - Late Rate: ${metrics.lateRate}%
             - Total Expected Doses: ${metrics.totalExpectedDoses}`,
-          },
-        ],
-        temperature: 0.4,
-      });
+        },
+      ];
+      const response = await this.callJsonStructuredApiWithRetry(messages, 0.4);
 
       return response.choices?.[0]?.message?.content || 'No review generated.';
     } catch (error) {
@@ -296,12 +396,10 @@ export class OpenaiService {
     contextHistory: string = '',
   ): Promise<string> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, an empathetic, supportive, and highly professional AI medical prescription companion. 
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, an empathetic, supportive, and highly professional AI medical prescription companion. 
             Your goal is to help users manage their medications without sounding like a rigid machine.
             
             GUIDELINES:
@@ -309,18 +407,17 @@ export class OpenaiService {
             2. If the user greets you or asks vague questions, respond conversationally but gently guide them to share their medication names, dosages, or scheduling worries.
             3. Keep your answers concise, clear, and easy to read on a mobile WhatsApp screen (use short paragraphs or bullet points where appropriate).
             4. Never give definitive diagnostic medical judgments. Always maintain a safe, supportive boundary.`,
-          },
-          {
-            role: 'user',
-            content: `User Context/History: ${contextHistory}\nNew Inbound Message: "${userMessage}"`,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 250,
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `User Context/History: ${contextHistory}\nNew Inbound Message: "${userMessage}"`,
+        },
+      ];
+
+      const response = await this.callUnstructuredApi(messages, 0.7, 250);
 
       return (
-        response.choices[0].message.content ||
+        response.choices?.[0]?.message?.content ||
         "I'm here to help. Could you please share your prescription or medication details?"
       );
     } catch (error) {
@@ -339,12 +436,10 @@ export class OpenaiService {
     language: 'EN' | 'FR' = 'EN',
   ): Promise<string> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba, a deeply compassionate, warm, and professional AI medical companion. 
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: 'system' as const,
+          content: `You are Remba, a deeply compassionate, warm, and professional AI medical companion. 
             A user has messaged you with a query or statement that falls outside of direct medication compliance updates.
 
             YOUR TASKS:
@@ -352,18 +447,17 @@ export class OpenaiService {
             2. Gracefully disregard irrelevant or advanced clinical diagnostic queries by indicating that your main purpose is to help them track and stay regular with their medications (Remba's core mission).
             3. Explicitly pivot back to their health routine or check-ins. Keep the message concise, highly supportive, and easy to read on a mobile WhatsApp screen.
             4. Respond entirely in the user's language constraint: ${language}.`,
-          },
-          {
-            role: 'user',
-            content: `User Name: ${userName}\nIncoming Message: "${userMessage}"`,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 200,
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `User Name: ${userName}\nIncoming Message: "${userMessage}"`,
+        },
+      ];
+
+      const response = await this.callUnstructuredApi(messages, 0.7, 200);
 
       return (
-        response.choices[0].message.content ||
+        response.choices?.[0]?.message?.content ||
         (language === 'FR'
           ? `Je suis là pour vous accompagner dans votre traitement. Prenons soin de votre santé ensemble !`
           : `I am right here to help you manage your treatment. Let's take care of your health together!`)
@@ -389,12 +483,10 @@ export class OpenaiService {
     language: 'EN' | 'FR' = 'EN',
   ): Promise<{ type: 'SCHEDULE' | 'CHAT'; responseText?: string }> {
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are Remba's conversational routing intelligence router. Your job is to classify an incoming message from a patient.
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: 'system' as const,
+          content: `You are Remba's conversational routing intelligence router. Your job is to classify an incoming message from a patient.
             
             Determine if the user is trying to add/register a new medication schedule (e.g., "Add Paracetamol", "Take pill at 8am", "I have a new prescription for Amoxicillin").
             - If they ARE trying to add a medication, return a strict JSON block: { "type": "SCHEDULE" }
@@ -406,18 +498,19 @@ export class OpenaiService {
             2. Gracefully disregard clinical diagnostic queries or completely irrelevant topics by explaining that your core mission is to help them track and stay regular with their medication schedules.
             3. Pivot back to their routine or check-ins. Keep it concise for a mobile screen.
             4. Respond entirely in the user's language: ${language}.`,
-          },
-          {
-            role: 'user',
-            content: `User Name: ${userName}\nMessage: "${userMessage}"`,
-          },
-        ],
-        temperature: 0.5,
-        response_format: { type: 'json_object' },
-      });
+        },
+        {
+          role: 'user' as const,
+          content: `User Name: ${userName}\nMessage: "${userMessage}"`,
+        },
+      ];
+
+      const response = await this.callJsonStructuredApiWithRetry(messages, 0.5);
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const result = JSON.parse(response.choices[0].message.content || '{}');
+      const result = JSON.parse(
+        response.choices?.[0]?.message?.content || '{}',
+      );
       return {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
         type: result.type || 'CHAT',
