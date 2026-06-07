@@ -18,13 +18,11 @@ export class SchedulerService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleMedicationAlerts() {
-    const baseServerDate = new Date(); // Get base UTC system clock
-
+    const baseServerDate = new Date();
     this.logger.log(
       `Cron loop ticking. System UTC Hour: ${baseServerDate.getUTCHours()}:${baseServerDate.getUTCMinutes()}`,
     );
 
-    // Fetch ALL active reminders along with their user settings
     const activeReminders = await this.prisma.reminder.findMany({
       where: { isActive: true },
       include: { user: true },
