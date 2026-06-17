@@ -262,8 +262,8 @@ export class SchedulerService {
   }
 
   /**
-   * Hackathon Optimization: Prevents Render free-tier containers from sleeping.
-   * Fires a lightweight internal heartbeat ping every 10 minutes.
+   * Keeps idle-sleeping hosting containers awake by firing a lightweight
+   * internal heartbeat ping every 10 minutes. No-op when PRODUCTION_URL is unset.
    */
   @Cron('*/10 * * * *')
   async keepContainerWarm() {
@@ -279,7 +279,7 @@ export class SchedulerService {
       this.logger.log(`[✅ HEARTBEAT] Server responded with: ${response.data}`);
     } catch (error) {
       this.logger.error(
-        '[⚠️ HEARTBEAT] Self-ping failed. Make sure PRODUCTION_URL environment variable is set on Render.',
+        '[⚠️ HEARTBEAT] Self-ping failed. Make sure the PRODUCTION_URL environment variable is set.',
         error instanceof Error ? error.message : String(error),
       );
     }
