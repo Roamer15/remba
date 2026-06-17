@@ -50,6 +50,7 @@ export class AnalyticsService {
           phoneNumber,
           initialText,
         );
+        return;
       }
 
       // 3. Apply your precise structural performance math formulas (Question 1 Blueprint)
