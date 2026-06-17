@@ -117,6 +117,56 @@ export const TOOL_SCHEMAS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_reminder',
+      description:
+        'Change the time of an EXISTING medication reminder. Use when the patient wants to move/reschedule a reminder they already have (e.g. "move my morning Amoxicillin to 9am"). Do NOT use create_medication_reminders for changes — that would create a duplicate.',
+      parameters: {
+        type: 'object',
+        properties: {
+          medicationName: {
+            type: 'string',
+            description: 'Name of the medication whose reminder is changing.',
+          },
+          currentTime: {
+            type: 'string',
+            description:
+              'The existing 24h HH:MM time of the reminder to change (from the active reminders list).',
+          },
+          newTime: {
+            type: 'string',
+            description: 'The new 24h HH:MM time.',
+          },
+        },
+        required: ['medicationName', 'currentTime', 'newTime'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_reminder',
+      description:
+        'Stop/cancel a medication reminder. Use when the patient no longer wants reminders for a medication (e.g. "stop reminding me about Vitamin C"). If a specific time is given, cancel only that one; otherwise cancel all reminders for that medication.',
+      parameters: {
+        type: 'object',
+        properties: {
+          medicationName: {
+            type: 'string',
+            description: 'Name of the medication to stop reminding about.',
+          },
+          time: {
+            type: 'string',
+            description:
+              'Optional 24h HH:MM of the specific reminder to cancel. Omit to cancel all reminders for this medication.',
+          },
+        },
+        required: ['medicationName'],
+      },
+    },
+  },
 ];
 
 export interface ToolDeps {
@@ -276,6 +326,82 @@ export function buildToolRegistry(deps: ToolDeps): Record<string, ToolHandler> {
         },
       });
       return { reminders };
+    },
+
+    async update_reminder(args, user) {
+      const active = await prisma.reminder.findMany({
+        where: { userPhoneNumber: user.phoneNumber, isActive: true },
+      });
+
+      const wantedName = String(args.medicationName || '').toLowerCase();
+      const target = active.find(
+        (r) =>
+          r.medicationName.toLowerCase() === wantedName &&
+          r.reminderTime === args.currentTime,
+      );
+
+      if (!target) {
+        return {
+          success: false,
+          error: 'No matching active reminder found at that time.',
+        };
+      }
+
+      const collision = active.find(
+        (r) =>
+          r.id !== target.id &&
+          r.medicationName.toLowerCase() === wantedName &&
+          r.reminderTime === args.newTime,
+      );
+
+      if (collision) {
+        return {
+          success: false,
+          error: 'A reminder for this medication already exists at the new time.',
+        };
+      }
+
+      await prisma.reminder.update({
+        where: { id: target.id },
+        data: { reminderTime: args.newTime },
+      });
+
+      return {
+        success: true,
+        medicationName: target.medicationName,
+        oldTime: args.currentTime,
+        newTime: args.newTime,
+      };
+    },
+
+    async cancel_reminder(args, user) {
+      const active = await prisma.reminder.findMany({
+        where: { userPhoneNumber: user.phoneNumber, isActive: true },
+      });
+
+      const wantedName = String(args.medicationName || '').toLowerCase();
+      const matches = active.filter(
+        (r) =>
+          r.medicationName.toLowerCase() === wantedName &&
+          (!args.time || r.reminderTime === args.time),
+      );
+
+      if (matches.length === 0) {
+        return { success: false, error: 'No matching active reminder found.' };
+      }
+
+      await prisma.reminder.updateMany({
+        where: { id: { in: matches.map((m) => m.id) } },
+        data: { isActive: false },
+      });
+
+      return {
+        success: true,
+        cancelled: matches.map((m) => ({
+          medicationName: m.medicationName,
+          reminderTime: m.reminderTime,
+        })),
+      };
     },
   };
 }

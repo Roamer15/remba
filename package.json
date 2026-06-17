@@ -1,10 +1,22 @@
 {
   "name": "remba",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "Remba is a WhatsApp-based AI medication-adherence companion for patients with chronic conditions (HIV, TB, hypertension). Built with NestJS, Prisma and OpenAI, it runs a tool-using agent that sends timezone-aware dose reminders, tracks adherence streaks, understands natural-language check-ins, escalates repeatedly missed doses to a caretaker, and produces weekly adherence reports — all bilingual (English/French). Aligned with UN SDG 3 (Good Health & Well-being).",
+  "author": "Beleke Ian",
   "private": true,
   "license": "MIT",
+  "keywords": [
+    "whatsapp",
+    "medication-adherence",
+    "healthcare",
+    "sdg3",
+    "ai-agent",
+    "tool-calling",
+    "nestjs",
+    "openai",
+    "prisma",
+    "chatbot"
+  ],
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -70,6 +82,10 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1",
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
