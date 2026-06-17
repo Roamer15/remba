@@ -19,10 +19,23 @@ model User {
   timezoneOffset Int     @default(1)
   createdAt   DateTime   @default(now())
   reminders   Reminder[]
+  messages    Message[]
   mentorId       String?    // Foreign key linking to their supporter
   mentor         Mentor?    @relation(fields: [mentorId], references: [id])
 
   @@map("users")
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  user            User     @relation(fields: [userPhoneNumber], references: [phoneNumber], onDelete: Cascade)
+  userPhoneNumber String
+  role            String   // "user" | "assistant"
+  content         String
+  createdAt       DateTime @default(now())
+
+  @@index([userPhoneNumber, createdAt])
+  @@map("messages")
 }
 
 model Mentor {

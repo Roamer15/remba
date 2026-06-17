@@ -2,14 +2,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OpenAI } from 'openai';
 import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-result.interface';
-import { ScheduleExtractionResult } from './interfaces/schedule-interaction.interface';
-import { AdherenceExtractionResult } from './interfaces/adherence-extraction.interface';
 import { WeeklyMetrics } from './interfaces/weekly-report.interface';
-import { ChatCompletionMessageParam } from 'openai/resources.js';
+import {
+  ChatCompletionMessage,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+} from 'openai/resources.js';
 
 @Injectable()
 export class OpenaiService {
   private openai: OpenAI;
+  private readonly model = 'gpt-4o-mini';
   private readonly logger = new Logger(OpenaiService.name);
 
   constructor() {
@@ -23,8 +26,28 @@ export class OpenaiService {
   }
 
   /**
+   * Runs a single tool-enabled chat completion for the agent loop.
+   * Returns the assistant message, which is either a final text reply
+   * (message.content) or a set of tool calls (message.tool_calls) for the
+   * caller to execute and feed back.
+   */
+  async runToolCompletion(
+    messages: ChatCompletionMessageParam[],
+    tools: ChatCompletionTool[],
+    temperature = 0.4,
+  ): Promise<ChatCompletionMessage> {
+    const response = await this.openai.chat.completions.create({
+      model: this.model,
+      messages,
+      tools,
+      tool_choice: 'auto',
+      temperature,
+    });
+    return response.choices[0].message;
+  }
+
+  /**
    * Calls OpenAI API with JSON structured output format.
-   * Used for extracting and parsing structured data (schedules, adherence, classifications).
    * Enforces valid JSON responses matching a defined schema.
    */
   private async callJsonStructuredApi(
@@ -32,27 +55,10 @@ export class OpenaiService {
     temperature: number,
   ) {
     return await this.openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: this.model,
       messages,
       response_format: { type: 'json_object' },
       temperature,
-    });
-  }
-
-  /**
-   * Calls OpenAI API for unstructured conversational responses.
-   * Used for generating natural language replies without strict JSON constraints.
-   */
-  private async callUnstructuredApi(
-    messages: ChatCompletionMessageParam[],
-    temperature: number,
-    maxTokens?: number,
-  ) {
-    return await this.openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages,
-      temperature,
-      ...(maxTokens && { max_tokens: maxTokens }),
     });
   }
 
@@ -67,11 +73,6 @@ export class OpenaiService {
   /**
    * Calls OpenAI API with JSON structured output and automatic retry logic.
    * Retries with exponential backoff if empty responses are received.
-   * @param messages - ChatCompletion messages array
-   * @param temperature - Model temperature for response generation
-   * @param maxRetries - Maximum number of retry attempts (default: 3)
-   * @param baseDelayMs - Initial delay in milliseconds before first retry (default: 500ms)
-   * @returns OpenAI API response or throws error after max retries exhausted
    */
   private async callJsonStructuredApiWithRetry(
     messages: ChatCompletionMessageParam[],
@@ -143,14 +144,14 @@ export class OpenaiService {
         {
           role: 'system' as const,
           content: `You are Remba, a warm, professional virtual health companion in Cameroon assisting patients with chronic conditions (HIV, TB, hypertension).
-            
+
             Your task is to parse onboarding details from a new user payload and respond with a strict JSON format.
-            
+
             CRITICAL INSTRUCTIONS:
             1. Clean the provided WhatsApp profile name by stripping out emojis, symbols, or icons, leaving only clean text. If the name is blank or only emojis, default it to a respectful title like "Friend".
             2. Detect if the user's message is written in English or French. If ambiguous, default to "EN".
             3. Generate a warm, reassuring greeting response using the cleaned name in their detected language. Briefly introduce Remba as their medication buddy, explain that you are here to help them take their doses on time, and ask them what medication they would like to set up a reminder for.
-            
+
             You MUST respond ONLY with a valid JSON object matching this schema:
             {
               "detectedLanguage": "EN" | "FR",
@@ -207,144 +208,6 @@ export class OpenaiService {
   }
 
   /**
-   * Parses natural text strings from existing users to extract structured medication regimes.
-   * Maps vague descriptions (morning, evening, etc.) into definitive 24h string values.
-   */
-  async extractMedicationSchedules(
-    incomingText: string,
-    language: 'EN' | 'FR',
-    userName: string,
-  ): Promise<ScheduleExtractionResult> {
-    try {
-      const MAX_NUMBER_OF_RETRIES = 3;
-      const sanitizedMessage = this.sanitizeInput(incomingText);
-      const messagePayload = [
-        {
-          role: 'system' as const,
-          content: `You are Remba, a helpful, empathetic medication scheduling assistant. Your job is to extract medication names and precise times from natural text.
-            
-            Context: You are talking to a patient named ${userName}. Their preferred language code is ${language}. You MUST respond in this language.
-            
-            CRITICAL PROCESSING RULES:
-            1. If the user mentions vague periods instead of exact numbers, map them to these 24-hour markers:
-               - Morning / Matin -> "08:00"
-               - Afternoon / Après-midi -> "13:00"
-               - Evening / Soir -> "19:00"
-               - Night / Nuit -> "21:00"
-            2. If they provide multiple times or specify something like "twice a day (8am and 8pm)", generate multiple entries in the array for that medication name.
-            3. GUARDRAIL: If the user's text is unrelated to medical setups (e.g., "What is your name?", "Thank you", "I am tired"), leave the "remindersFound" array completely EMPTY. In the "confirmationMessage", provide a brief polite answer to their comment, but strictly remind them that they need to add their medication details first before proceeding with a wider discussion.
-            
-            You MUST respond ONLY with a valid JSON object matching this schema:
-            {
-              "remindersFound": [
-                { "medicationName": "string", "reminderTime": "string (format HH:MM)" }
-              ],
-              "confirmationMessage": "string"
-            }`,
-        },
-        {
-          role: 'user' as const,
-          content: `Message to parse: "${sanitizedMessage}"`,
-        },
-      ];
-
-      const response = await this.callJsonStructuredApiWithRetry(
-        messagePayload,
-        0.1,
-        MAX_NUMBER_OF_RETRIES,
-      );
-      const content = response.choices?.[0]?.message?.content;
-
-      if (!content) {
-        throw new Error(
-          'No content returned from OpenAI schedule extraction token payload',
-        );
-      }
-
-      return JSON.parse(content) as ScheduleExtractionResult;
-    } catch (error) {
-      this.logger.error(
-        'Failed extracting schedules from text layout stream',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-
-      // Fallback response safely typed to meet contract constraints
-      return {
-        remindersFound: [],
-        confirmationMessage:
-          language === 'FR'
-            ? "Désolé, je n'ai pas pu structurer vos rappels. Veuillez spécifier le nom du médicament et l'heure (ex: Paracétamol à 8h)."
-            : "Sorry, I couldn't structure your reminders clearly. Please specify the drug name and time (e.g., Paracetamol at 8am).",
-      };
-    }
-  }
-
-  /**
-   * Analyzes customer check-ins when they don't match strict keywords.
-   * Classifies intents and extracts barriers (notes) for the adherence reports.
-   */
-  async parseAdherenceResponse(
-    incomingText: string,
-    language: 'EN' | 'FR',
-    userName: string,
-  ): Promise<AdherenceExtractionResult> {
-    try {
-      const message = [
-        {
-          role: 'system' as const,
-          content: `You are Remba, an empathetic virtual health companion in Cameroon tracking patient adherence for chronic therapies.
-            
-            Analyze the user's reply text and determine their action intent.
-            
-            CLASSIFICATION RULES:
-            - intent: "TAKEN" if they confirm they took their medication (even if late or in local slang/phrasing).
-            - intent: "SKIP" if they missed it, cannot take it, or are expressing a barrier.
-            - intent: "UNKNOWN" if it is general conversational chatter.
-            
-            IF INTENT IS "SKIP":
-            1. Categorize their primary barrier into skipReasonCategory ("SIDE_EFFECTS", "OUT_OF_STOCK", "FORGOT", "OTHER").
-            2. Summarize their barrier concisely in skipReasonNotes in English (max 10 words, e.g., "Experiencing severe dizziness").
-            
-            GENERATING THE MOTIVATIONAL RESPONSE:
-            - If TAKEN: Provide a very brief, high-energy cheer (1 sentence) using their preference language (${language}). You can use minor local encouragement or emojis like 🔥.
-            - If SKIP: Respond with deep medical empathy (1-2 sentences). Validate their struggle, encourage them to stay strong, and gently advise them to contact their local clinic provider if health anomalies persist.
-            
-            You MUST respond ONLY with a valid JSON object matching this schema:
-            {
-              "intent": "TAKEN" | "SKIP" | "UNKNOWN",
-              "skipReasonCategory": "SIDE_EFFECTS" | "OUT_OF_STOCK" | "FORGOT" | "OTHER" | null,
-              "skipReasonNotes": "string" | null,
-              "motivationalResponse": "string"
-            }`,
-        },
-        {
-          role: 'user' as const,
-          content: `Patient Name: ${userName}\nMessage: "${incomingText}"`,
-        },
-      ];
-
-      const response = await this.callJsonStructuredApiWithRetry(message, 0.2);
-      const content = response.choices?.[0]?.message?.content;
-
-      if (!content) throw new Error('Empty payload exception');
-
-      return JSON.parse(content) as AdherenceExtractionResult;
-    } catch (error) {
-      this.logger.error(
-        'Failed to parse adherence text response payload via OpenAI',
-        error,
-      );
-      return {
-        intent: 'UNKNOWN',
-        motivationalResponse:
-          language === 'FR'
-            ? "Merci pour votre message. S'il s'agit de votre traitement, répondez 'TAKEN' pour valider."
-            : "Thank you for your message. If this is regarding your medication, please reply 'TAKEN' to confirm.",
-      };
-    }
-  }
-
-  /**
    * Generates an automated weekly clinical health analysis review.
    * Modulates behavioral coaching tone strictly based on computed compliance rates.
    */
@@ -358,14 +221,14 @@ export class OpenaiService {
         {
           role: 'system' as const,
           content: `You are Remba, a firm yet compassionate virtual medical specialist tracking treatment logs in Cameroon.
-            
+
             You are writing a weekly health summary review for a patient named ${userName}. Language preference: ${language}.
-            
+
             TONE ADJUSTMENT CRITERIA BASED ON ADHERENCE RATE (${metrics.adherenceRate}%):
             1. POOR COMPLIANCE (Adherence < 80%): Use a stern, serious, and urgent tone (a medical scolding). Strongly emphasize that missing chronic treatments causes drug resistance, treatment failure, and severe clinical deterioration. Demand higher responsibility, address their high Skip Rate (${metrics.skipRate}%), and insist they get back on track.
             2. MODERATE COMPLIANCE (Adherence 80% - 94%): Use a firm, encouraging, coaching tone. Note that they are doing well but highlight their Late Rate (${metrics.lateRate}%) or Skip Rate if applicable, reminding them that precision timing maximizes therapy success.
             3. PERFECT COMPLIANCE (Adherence 95% - 100%): Use a warm, celebratory, high-energy tone. Express absolute pride, congratulate their amazing milestone streak, and encourage them to continue maintaining this gold standard for their long-term health.
-            
+
             Keep the content punchy, empathetic but direct, and restricted entirely to the medical domain (max 4-5 sentences). Do not wrap inside JSON, return the raw message string output directly.`,
         },
         {
@@ -388,141 +251,6 @@ export class OpenaiService {
       return language === 'FR'
         ? 'Voici votre bilan hebdomadaire : Continuez à prendre soin de votre santé au quotidien !'
         : 'Here is your weekly health summary review: Please continue prioritizing your dosage timing daily!';
-    }
-  }
-
-  async generateHumanResponse(
-    userMessage: string,
-    contextHistory: string = '',
-  ): Promise<string> {
-    try {
-      const messages: ChatCompletionMessageParam[] = [
-        {
-          role: 'system' as const,
-          content: `You are Remba, an empathetic, supportive, and highly professional AI medical prescription companion. 
-            Your goal is to help users manage their medications without sounding like a rigid machine.
-            
-            GUIDELINES:
-            1. Speak naturally, warmly, and politely—like a caring healthcare assistant.
-            2. If the user greets you or asks vague questions, respond conversationally but gently guide them to share their medication names, dosages, or scheduling worries.
-            3. Keep your answers concise, clear, and easy to read on a mobile WhatsApp screen (use short paragraphs or bullet points where appropriate).
-            4. Never give definitive diagnostic medical judgments. Always maintain a safe, supportive boundary.`,
-        },
-        {
-          role: 'user' as const,
-          content: `User Context/History: ${contextHistory}\nNew Inbound Message: "${userMessage}"`,
-        },
-      ];
-
-      const response = await this.callUnstructuredApi(messages, 0.7, 250);
-
-      return (
-        response.choices?.[0]?.message?.content ||
-        "I'm here to help. Could you please share your prescription or medication details?"
-      );
-    } catch (error) {
-      this.logger.error('OpenAI API Generation Error', error);
-      return "Thank you for reaching out to Remba. I'm reviewing your request, please tell me more about your medication details.";
-    }
-  }
-
-  /**
-   * Generates a warm, empathetic response for general user queries
-   * while gracefully refocusing them on Remba's core tracking features.
-   */
-  async generateConversationalCareResponse(
-    userMessage: string,
-    userName: string,
-    language: 'EN' | 'FR' = 'EN',
-  ): Promise<string> {
-    try {
-      const messages: ChatCompletionMessageParam[] = [
-        {
-          role: 'system' as const,
-          content: `You are Remba, a deeply compassionate, warm, and professional AI medical companion. 
-            A user has messaged you with a query or statement that falls outside of direct medication compliance updates.
-
-            YOUR TASKS:
-            1. Respond with genuine empathy, care, and a human-like tone based on what they said (e.g., if they feel bad, comfort them; if they ask a general question, answer warmly).
-            2. Gracefully disregard irrelevant or advanced clinical diagnostic queries by indicating that your main purpose is to help them track and stay regular with their medications (Remba's core mission).
-            3. Explicitly pivot back to their health routine or check-ins. Keep the message concise, highly supportive, and easy to read on a mobile WhatsApp screen.
-            4. Respond entirely in the user's language constraint: ${language}.`,
-        },
-        {
-          role: 'user' as const,
-          content: `User Name: ${userName}\nIncoming Message: "${userMessage}"`,
-        },
-      ];
-
-      const response = await this.callUnstructuredApi(messages, 0.7, 200);
-
-      return (
-        response.choices?.[0]?.message?.content ||
-        (language === 'FR'
-          ? `Je suis là pour vous accompagner dans votre traitement. Prenons soin de votre santé ensemble !`
-          : `I am right here to help you manage your treatment. Let's take care of your health together!`)
-      );
-    } catch (error) {
-      this.logger.error(
-        'Failed generating care fallback response stream',
-        error,
-      );
-      return language === 'FR'
-        ? `Merci pour votre message. Continuons à suivre votre calendrier de traitement régulièrement.`
-        : `Thank you for your message. Let's stay focused on keeping your medication schedule perfectly on track.`;
-    }
-  }
-
-  /**
-   * Evaluates if an existing user's free text is a clear instruction to schedule
-   * a medication or just general conversational context/questions.
-   */
-  async classifyAndHandleConversation(
-    userMessage: string,
-    userName: string,
-    language: 'EN' | 'FR' = 'EN',
-  ): Promise<{ type: 'SCHEDULE' | 'CHAT'; responseText?: string }> {
-    try {
-      const messages: ChatCompletionMessageParam[] = [
-        {
-          role: 'system' as const,
-          content: `You are Remba's conversational routing intelligence router. Your job is to classify an incoming message from a patient.
-            
-            Determine if the user is trying to add/register a new medication schedule (e.g., "Add Paracetamol", "Take pill at 8am", "I have a new prescription for Amoxicillin").
-            - If they ARE trying to add a medication, return a strict JSON block: { "type": "SCHEDULE" }
-            
-            - If they are asking a question, venting, greeting you, or talking about something else (e.g., side effects, food interactions, general questions, greetings), return: { "type": "CHAT", "responseText": "Your empathetic response here" }
-
-            CHAT RULES:
-            1. Respond with genuine empathy and care as a supportive medical companion.
-            2. Gracefully disregard clinical diagnostic queries or completely irrelevant topics by explaining that your core mission is to help them track and stay regular with their medication schedules.
-            3. Pivot back to their routine or check-ins. Keep it concise for a mobile screen.
-            4. Respond entirely in the user's language: ${language}.`,
-        },
-        {
-          role: 'user' as const,
-          content: `User Name: ${userName}\nMessage: "${userMessage}"`,
-        },
-      ];
-
-      const response = await this.callJsonStructuredApiWithRetry(messages, 0.5);
-
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-      const result = JSON.parse(
-        response.choices?.[0]?.message?.content || '{}',
-      );
-      return {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        type: result.type || 'CHAT',
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        responseText: result.responseText as string,
-      };
-    } catch (error) {
-      this.logger.error(
-        'Failed to classify casual user interaction mapping',
-        error,
-      );
-      return { type: 'SCHEDULE' };
     }
   }
 }
