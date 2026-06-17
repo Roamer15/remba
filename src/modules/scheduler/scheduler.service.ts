@@ -28,31 +28,59 @@ export class SchedulerService {
       include: { user: true },
     });
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Catch-up window: a reminder fires if we are within this many minutes
+    // PAST its scheduled time. This makes dispatch resilient to missed/late
+    // cron ticks in production (container throttling, restarts, GC pauses)
+    // instead of requiring the tick to land on the exact target minute.
+    const DISPATCH_WINDOW_MINUTES = 10;
+    // Suppress a re-send if this reminder already produced a dose log recently.
+    // Must be longer than the window but shorter than a day so that the next
+    // day's dose still fires.
+    const DEDUPE_LOOKBACK_HOURS = 18;
 
     for (const reminder of activeReminders) {
       try {
         const now = new Date();
         const userOffset = reminder.user.timezoneOffset;
 
-        let localHour = now.getUTCHours() + userOffset;
-        localHour = ((localHour % 24) + 24) % 24;
-        const localMinutes = now.getUTCMinutes();
+        // Current local time and the target time, both as minutes since midnight.
+        const utcMinutesOfDay = now.getUTCHours() * 60 + now.getUTCMinutes();
+        let localMinutesOfDay = utcMinutesOfDay + userOffset * 60;
+        localMinutesOfDay = ((localMinutesOfDay % 1440) + 1440) % 1440;
 
-        const computedUserTime = `${String(localHour).padStart(2, '0')}:${String(localMinutes).padStart(2, '0')}`;
+        const [targetHour, targetMinute] = reminder.reminderTime
+          .split(':')
+          .map((part) => parseInt(part, 10));
 
-        if (reminder.reminderTime !== computedUserTime) {
-          this.logger.debug(
-            `Mismatch: DB=${reminder.reminderTime}, computed=${computedUserTime}, offset=${userOffset}, utc=${baseServerDate.toISOString()}`,
+        if (Number.isNaN(targetHour) || Number.isNaN(targetMinute)) {
+          this.logger.warn(
+            `Skipping reminder ${reminder.id} with malformed reminderTime "${reminder.reminderTime}"`,
           );
           continue;
         }
-        // Idempotency check
+
+        const targetMinutesOfDay = targetHour * 60 + targetMinute;
+
+        // Minutes elapsed since the dose was due (handles midnight wrap-around).
+        let minutesSinceDue = localMinutesOfDay - targetMinutesOfDay;
+        if (minutesSinceDue < -720) minutesSinceDue += 1440;
+
+        if (minutesSinceDue < 0 || minutesSinceDue >= DISPATCH_WINDOW_MINUTES) {
+          const localClock = `${String(Math.floor(localMinutesOfDay / 60)).padStart(2, '0')}:${String(localMinutesOfDay % 60).padStart(2, '0')}`;
+          this.logger.debug(
+            `No dispatch for ${reminder.id}: target=${reminder.reminderTime}, localNow=${localClock}, offset=${userOffset}, minutesSinceDue=${minutesSinceDue}, utc=${baseServerDate.toISOString()}`,
+          );
+          continue;
+        }
+
+        // Idempotency: only one alert per reminder per scheduled dose.
+        const dedupeSince = new Date(
+          now.getTime() - DEDUPE_LOOKBACK_HOURS * 60 * 60 * 1000,
+        );
         const existingLog = await this.prisma.doseLog.findFirst({
           where: {
             reminderId: reminder.id,
-            timestamp: { gte: todayStart },
+            timestamp: { gte: dedupeSince },
           },
         });
 
@@ -76,7 +104,7 @@ export class SchedulerService {
         );
 
         this.logger.log(
-          `Alert delivered dynamically for localized zone matching time: ${computedUserTime}`,
+          `Alert delivered for reminder ${reminder.id} (target ${reminder.reminderTime}, ${minutesSinceDue}m after due) to ${reminder.userPhoneNumber}`,
         );
       } catch (err) {
         this.logger.error(
