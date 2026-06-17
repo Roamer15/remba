@@ -96,7 +96,7 @@ export class AgentService {
         const toolCalls = message.tool_calls;
         if (toolCalls && toolCalls.length > 0) {
           // Echo the assistant's tool-call message, then append each result.
-          messages.push(message as ChatCompletionMessageParam);
+          messages.push(message);
 
           for (const call of toolCalls) {
             if (call.type !== 'function') continue;
@@ -185,9 +185,10 @@ export class AgentService {
       take: this.HISTORY_LIMIT,
     });
 
-    return rows
-      .reverse()
-      .map((r) => ({ role: r.role as 'user' | 'assistant', content: r.content }));
+    return rows.reverse().map((r) => ({
+      role: r.role as 'user' | 'assistant',
+      content: r.content,
+    }));
   }
 
   private async persistTurn(
@@ -215,7 +216,8 @@ export class AgentService {
 
     const offset = user.timezoneOffset ?? 1;
     const now = new Date();
-    let localMinutes = now.getUTCHours() * 60 + now.getUTCMinutes() + offset * 60;
+    let localMinutes =
+      now.getUTCHours() * 60 + now.getUTCMinutes() + offset * 60;
     localMinutes = ((localMinutes % 1440) + 1440) % 1440;
     const localClock = `${String(Math.floor(localMinutes / 60)).padStart(2, '0')}:${String(localMinutes % 60).padStart(2, '0')}`;
 
