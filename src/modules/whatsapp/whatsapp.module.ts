@@ -6,6 +6,7 @@ import { OpenaiService } from 'src/openai/openai.service';
 import { PrismaService } from 'src/prisma.service';
 import { SchedulerService } from '../scheduler/scheduler.service';
 import { AnalyticsService } from '../scheduler/analytics.service';
+import { AgentService } from '../agent/agent.service';
 
 @Module({
   controllers: [WhatsappController],
@@ -16,6 +17,7 @@ import { AnalyticsService } from '../scheduler/analytics.service';
     PrismaService,
     SchedulerService,
     AnalyticsService,
+    AgentService,
   ],
 })
 export class WhatsappModule {}
