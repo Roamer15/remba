@@ -14,4 +14,7 @@ export interface IncomingMessagePayload {
   from: string;
   text: string;
   profileName: string;
+  /** Media ID of an attached image (e.g. a prescription photo), if present. */
+  imageId?: string;
+  imageMimeType?: string;
 }

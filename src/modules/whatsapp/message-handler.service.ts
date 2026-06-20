@@ -21,7 +21,7 @@ export class MessageHandlerService {
    * New users are onboarded; existing users are handed to the tool-using agent.
    */
   async handleIncomingPayload(payload: IncomingMessagePayload): Promise<void> {
-    const { from, text, profileName } = payload;
+    const { from, text, profileName, imageId } = payload;
 
     const user = await this.prisma.user.findUnique({
       where: { phoneNumber: from },
@@ -32,10 +32,25 @@ export class MessageHandlerService {
       return;
     }
 
+    // If an image (e.g. a prescription photo) was attached, fetch it so the
+    // agent's vision step can read it. Fall back to text-only on failure.
+    let imageDataUrl: string | undefined;
+    if (imageId) {
+      try {
+        imageDataUrl = await this.whatsappService.fetchMediaAsDataUrl(imageId);
+        this.logger.log(`Fetched image media ${imageId} for ${from}.`);
+      } catch (error) {
+        this.logger.error(
+          `Failed to fetch image media ${imageId} for ${from}; proceeding text-only.`,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+
     this.logger.log(
       `Routing interaction from ${user.name || from} to the agent engine.`,
     );
-    await this.agentService.run(user, text);
+    await this.agentService.run(user, text, imageDataUrl);
   }
 
   /**
