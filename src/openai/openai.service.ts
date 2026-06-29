@@ -1,6 +1,6 @@
 // src/openai/openai.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import { OpenAI } from 'openai';
+import { OpenAI, toFile } from 'openai';
 import { OnboardingResult } from 'src/modules/whatsapp/interfaces/onboarding-result.interface';
 import { WeeklyMetrics } from './interfaces/weekly-report.interface';
 import {
@@ -23,6 +23,47 @@ export class OpenaiService {
     this.openai = new OpenAI({
       apiKey: apiKey,
     });
+  }
+
+  /**
+   * Transcribes a voice note / audio clip to text using Whisper. An optional
+   * language hint (the user's "EN"/"FR") improves accuracy. Throws on failure
+   * so the caller can ask the patient to retry.
+   */
+  async transcribeAudio(
+    audio: Buffer,
+    mimeType: string,
+    language?: string,
+  ): Promise<string> {
+    const extension = this.audioExtensionFor(mimeType);
+    const file = await toFile(audio, `voice-note.${extension}`, {
+      type: mimeType,
+    });
+
+    const response = await this.openai.audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      ...(language ? { language: language.toLowerCase() } : {}),
+    });
+
+    return response.text.trim();
+  }
+
+  /**
+   * Maps an audio MIME type to the file extension Whisper uses to detect the
+   * format. WhatsApp voice notes are ogg/opus; defaults to ogg.
+   */
+  private audioExtensionFor(mimeType: string): string {
+    const subtype = mimeType.split('/')[1]?.split(';')[0]?.trim();
+    const extensions: Record<string, string> = {
+      ogg: 'ogg',
+      mpeg: 'mp3',
+      mp4: 'm4a',
+      'x-m4a': 'm4a',
+      wav: 'wav',
+      webm: 'webm',
+    };
+    return extensions[subtype] || 'ogg';
   }
 
   /**

@@ -48,4 +48,10 @@ export interface MetaMessage {
     sha256?: string;
     caption?: string;
   };
+  audio?: {
+    id?: string;
+    mime_type?: string;
+    sha256?: string;
+    voice?: boolean;
+  };
 }

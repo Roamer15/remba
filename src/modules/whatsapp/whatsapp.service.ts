@@ -17,6 +17,8 @@ export class WhatsappService {
     messageId: string;
     imageId?: string;
     imageMimeType?: string;
+    audioId?: string;
+    audioMimeType?: string;
   } | null {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
@@ -52,6 +54,19 @@ export class WhatsappService {
           imageMimeType: message.image.mime_type,
         };
       }
+
+      // Voice notes / audio messages. The bytes are fetched and transcribed
+      // later via the media ID; there is no inline text.
+      if (message.type === 'audio' && message.audio?.id) {
+        return {
+          from: message.from || '',
+          text: '',
+          profileName,
+          messageId: message.id || '',
+          audioId: message.audio.id,
+          audioMimeType: message.audio.mime_type,
+        };
+      }
     } catch (error) {
       this.logger.error(
         'Failed parsing Meta WhatsApp payload structure',
@@ -62,11 +77,13 @@ export class WhatsappService {
   }
 
   /**
-   * Downloads a WhatsApp media object (by media ID) and returns it as a base64
-   * data URL suitable for passing to a vision model. Meta requires two
-   * authenticated calls: resolve the media URL, then download the bytes.
+   * Downloads a WhatsApp media object (by media ID) and returns its raw bytes
+   * plus MIME type. Meta requires two authenticated calls: resolve the media
+   * URL, then download the bytes.
    */
-  async fetchMediaAsDataUrl(mediaId: string): Promise<string> {
+  async fetchMediaBytes(
+    mediaId: string,
+  ): Promise<{ data: Buffer; mimeType: string }> {
     const token = process.env.WHATSAPP_API_TOKEN;
     const graphUrl = process.env.FACEBOOK_ENTRY_URL;
 
@@ -84,7 +101,8 @@ export class WhatsappService {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const mediaUrl = metaResponse.data?.url as string | undefined;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const mimeType = (metaResponse.data?.mime_type as string) || 'image/jpeg';
+    const mimeType =
+      (metaResponse.data?.mime_type as string) || 'application/octet-stream';
 
     if (!mediaUrl) {
       throw new Error(`No media URL returned for media ID ${mediaId}`);
@@ -96,8 +114,16 @@ export class WhatsappService {
       responseType: 'arraybuffer',
     });
 
-    const base64 = Buffer.from(fileResponse.data).toString('base64');
-    return `data:${mimeType};base64,${base64}`;
+    return { data: Buffer.from(fileResponse.data), mimeType };
+  }
+
+  /**
+   * Downloads a WhatsApp media object and returns it as a base64 data URL,
+   * suitable for passing to a vision model.
+   */
+  async fetchMediaAsDataUrl(mediaId: string): Promise<string> {
+    const { data, mimeType } = await this.fetchMediaBytes(mediaId);
+    return `data:${mimeType};base64,${data.toString('base64')}`;
   }
 
   /**

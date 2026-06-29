@@ -17,4 +17,7 @@ export interface IncomingMessagePayload {
   /** Media ID of an attached image (e.g. a prescription photo), if present. */
   imageId?: string;
   imageMimeType?: string;
+  /** Media ID of an attached voice note / audio message, if present. */
+  audioId?: string;
+  audioMimeType?: string;
 }
