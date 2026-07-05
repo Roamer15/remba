@@ -46,7 +46,7 @@ export const TOOL_SCHEMAS: ChatCompletionTool[] = [
     function: {
       name: 'log_dose',
       description:
-        "Record whether the patient took or skipped their most recent due dose. Use when they confirm taking it (e.g. \"taken\", \"done\", \"yes I took it\") or report missing/skipping it. Applies to the patient's latest pending dose alert.",
+        'Record whether the patient took or skipped their most recent due dose. Use when they confirm taking it (e.g. "taken", "done", "yes I took it") or report missing/skipping it. Applies to the patient\'s latest pending dose alert.',
       parameters: {
         type: 'object',
         properties: {
@@ -357,7 +357,8 @@ export function buildToolRegistry(deps: ToolDeps): Record<string, ToolHandler> {
       if (collision) {
         return {
           success: false,
-          error: 'A reminder for this medication already exists at the new time.',
+          error:
+            'A reminder for this medication already exists at the new time.',
         };
       }
 

@@ -42,4 +42,16 @@ export interface MetaMessage {
   text?: {
     body?: string;
   };
+  image?: {
+    id?: string;
+    mime_type?: string;
+    sha256?: string;
+    caption?: string;
+  };
+  audio?: {
+    id?: string;
+    mime_type?: string;
+    sha256?: string;
+    voice?: boolean;
+  };
 }
