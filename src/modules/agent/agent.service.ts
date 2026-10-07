@@ -73,7 +73,7 @@ export class AgentService {
                 type: 'text',
                 text:
                   incomingText ||
-                  'Here is a photo of my prescription — please read it and set up my medication reminders.',
+                  'Here is a photo of my prescription, please read it and set up my medication reminders.',
               },
               { type: 'image_url', image_url: { url: imageDataUrl } },
             ],
