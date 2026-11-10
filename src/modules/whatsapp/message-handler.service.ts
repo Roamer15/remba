@@ -29,19 +29,19 @@ export class MessageHandlerService {
       where: { phoneNumber: from },
     });
 
-    // Voice note: transcribe it to text, then continue exactly as if typed.
-    if (audioId) {
-      const transcript = await this.transcribeVoiceNote(from, audioId, user);
-      if (transcript === null) return; // user was already notified of failure
-      text = transcript;
-    }
-
     if (!user) {
       await this.onboardNewUser(from, text, profileName);
       return;
     }
 
-    // If an image (e.g. a prescription photo) was attached, fetch it so the
+    // Voice note: transcribe it to text, then continue exactly as if typed.
+    if (audioId) {
+      const transcript = await this.transcribeVoiceNote(from, audioId, user);
+      if (transcript === null) return;
+      text = transcript;
+    }
+
+    // If an image was attached, fetch it so the
     // agent's vision step can read it. Fall back to text-only on failure.
     let imageDataUrl: string | undefined;
     if (imageId) {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 // src/modules/agent/tools.ts
 import type { ChatCompletionTool } from 'openai/resources.js';
 import type { User } from 'src/generated/prisma/client';

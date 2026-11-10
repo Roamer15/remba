@@ -100,8 +100,8 @@ export class WhatsappService {
     });
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const mediaUrl = metaResponse.data?.url as string | undefined;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const mimeType =
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       (metaResponse.data?.mime_type as string) || 'application/octet-stream';
 
     if (!mediaUrl) {
